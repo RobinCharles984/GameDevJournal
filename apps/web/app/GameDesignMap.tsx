@@ -14,14 +14,21 @@ import ReactFlow, {
   Edge
 } from 'reactflow';
 import 'reactflow/dist/style.css';
+import { useMemo } from 'react';
+import TipNode from './TipNode';
 import { supabase } from '@repo/database';
-import { SupabaseClient } from '@supabase/supabase-js'; // Importamos apenas a Tipagem
+import { SupabaseClient } from '@supabase/supabase-js';
 
 // Adicionamos o supabase na interface
 interface MapProps {
   userId: string;
   supabase: SupabaseClient; 
 }
+
+//Nodes customizados (essa bosta tem que ficar estritamente fora do GameDesignMap())
+  const nodeTypes = {
+    customTip: TipNode,
+  };
 
 // === COLE O ID DO USUÁRIO DE TESTE AQUI ===
 const TEST_USER_ID = 'a93eb967-a72c-45e5-83c5-ca5409d20360';
@@ -40,6 +47,50 @@ export default function GameDesignMap({ userId }: MapProps) {
   const [isAdding, setIsAdding] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newContent, setNewContent] = useState('');
+  const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
+
+  // === NOVA FUNÇÃO: DELETAR NÓ ESPECÍFICO ===
+  const handleDeleteNode = async (nodeId: string) => {
+    // 1. Apaga do banco de dados (o cascade cuidará das conexões)
+    const { error } = await supabase.from('tips').delete().eq('id', nodeId);
+    
+    if (error) {
+      console.error('Erro ao excluir:', error);
+      alert('Erro ao excluir a ideia.');
+      return;
+    }
+
+    // 2. Remove da tela
+    setNodes((nds) => nds.filter((node) => node.id !== nodeId));
+  };
+
+  // === NOVA FUNÇÃO: EDITAR NÓ (Estrutura básica) ===
+  const handleEditNode = (nodeId: string, currentTitle: string, currentContent: string) => {
+    setEditingNodeId(nodeId);
+    setNewTitle(currentTitle);
+    setNewContent(currentContent || "");
+    setIsAdding(true);
+    
+    if (newTitle && newTitle !== currentTitle) {
+       // Atualizaria no banco e no estado (setNodes) aqui
+       alert(`A ideia seria atualizada para: ${newTitle}`);
+    }
+  };
+
+  // === NOVA FUNÇÃO: SALVAR POSIÇÃO AO ARRASTAR ===
+  const onNodeDragStop = useCallback(async (event: React.MouseEvent, node: Node) => {
+    const { x, y } = node.position;
+
+    // Atualiza apenas as coordenadas no Supabase
+    const { error } = await supabase
+      .from('tips')
+      .update({ position_x: x, position_y: y })
+      .eq('id', node.id);
+
+    if (error) {
+      console.error('Erro ao salvar nova posição:', error);
+    }
+  }, [supabase]);
 
   // Mantemos sua função de carregar dados (pode voltar para a conexão real do Supabase)
   useEffect(() => {
@@ -49,8 +100,17 @@ export default function GameDesignMap({ userId }: MapProps) {
 
       const initialNodes: Node[] = (tipsData || []).map((tip, index) => ({
         id: tip.id,
-        data: { label: tip.title }, 
-        position: { x: 250 + (index * 150), y: 150 + (index * 50) },
+        type: 'customTip',
+        data: { 
+          title: tip.title,     
+          content: tip.content,
+          onDelete: handleDeleteNode,
+          onEdit: handleEditNode
+        }, 
+        position: { 
+          x: tip.position_x !== null ? tip.position_x : 250 + (index * 150), 
+          y: tip.position_y ? tip.position_y : 150 + (index * 50) 
+        },
         style: { background: '#fff', border: '1px solid #175e7a', borderRadius: '8px', padding: '10px' }
       }));
 
@@ -80,30 +140,58 @@ export default function GameDesignMap({ userId }: MapProps) {
   // === FUNÇÃO DE SALVAR NO BANCO ===
   async function handleSaveTip() {
     if (!newTitle.trim()) return alert('O título é obrigatório!');
-
+    
+    if(editingNodeId){
     // 1. Inserindo no Supabase
-    const { data, error } = await supabase
+    const { error } = await supabase
       .from('tips')
-      .insert([
-        {
-          title: newTitle,
-          content: newContent,
-          user_id: TEST_USER_ID // Usando o usuário de teste temporário
-        }
-      ])
-      .select()
-      .single(); // Retorna a linha recém-criada com o ID oficial do banco
+      .update({title: newTitle, content: newContent})
+      .eq('id', editingNodeId);
 
     if (error) {
-      console.error('Erro ao salvar:', error);
-      alert('Erro ao salvar a ideia no banco.');
+      console.error('Erro ao atualizar:', error);
+      alert('Erro ao atualizar a ideia no banco.');
       return;
     }
+
+    // Atualiza o visual do card na tela imediatamente
+      setNodes((nds) => nds.map((n) => 
+        n.id === editingNodeId 
+          ? { ...n, data: { ...n.data, title: newTitle, content: newContent } } 
+          : n
+      ));
+  }
+    else{
+      // 1. Inserindo no Supabase
+      const { data, error } = await supabase
+        .from('tips')
+        .insert([
+          {
+            title: newTitle,
+            content: newContent,
+            user_id: TEST_USER_ID // Usando o usuário de teste temporário
+          }
+        ])
+        .select()
+        .single(); // Retorna a linha recém-criada com o ID oficial do banco
+
+      if (error) {
+        console.error('Erro ao salvar:', error);
+        alert('Erro ao salvar a ideia no banco.');
+        return;
+      }
+    
 
     // 2. Criando o novo Nó (Node) para aparecer na tela imediatamente
     const newNode: Node = {
       id: data.id,
-      data: { label: data.title },
+      type: 'customTip',
+      data: { 
+          title: data.title,     
+          content: data.content,
+          onDelete: handleDeleteNode,
+          onEdit: handleEditNode 
+        },
       // Coloca o novo nó um pouco para baixo no centro da tela
       position: { x: 300, y: 100 }, 
       style: { background: '#fff', border: '1px solid #175e7a', borderRadius: '8px', padding: '10px' }
@@ -115,6 +203,8 @@ export default function GameDesignMap({ userId }: MapProps) {
     setNewTitle(''); // Limpa o input
     setNewContent('');
   }
+}
+  
 
   // === NOVA FUNÇÃO: FAZER LOGOUT ===
   async function handleLogout() {
@@ -196,11 +286,13 @@ export default function GameDesignMap({ userId }: MapProps) {
       <ReactFlow
         nodes={nodes}
         edges={edges}
+        nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         onNodesDelete={onNodesDelete}
         onEdgesDelete={onEdgesDelete}
+        onNodeDragStop={onNodeDragStop}
         fitView
       >
         <Background />
@@ -237,7 +329,9 @@ export default function GameDesignMap({ userId }: MapProps) {
             </button>
           ) : (
             <div style={{ padding: '15px', backgroundColor: 'white', borderRadius: '8px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              <h3 style={{ margin: 0, fontSize: '16px', color: '#333' }}>Adicionar Ideia</h3>
+              <h3 style={{ margin: 0, fontSize: '16px', color: '#333' }}>
+                {editingNodeId ? 'Editar Ideia' : 'Adicionar Ideia'}
+                </h3>
               
               <input 
                 placeholder="Título (ex: Pulo Duplo)" 
@@ -262,7 +356,12 @@ export default function GameDesignMap({ userId }: MapProps) {
                   Salvar
                 </button>
                 <button 
-                  onClick={() => setIsAdding(false)}
+                  onClick={() => {
+                    setIsAdding(false);
+                    setEditingNodeId(null);
+                    setNewTitle("");
+                    setNewContent("");
+                  }}
                   style={{ padding: '8px', backgroundColor: '#e0e0e0', color: '#333', borderRadius: '4px', border: 'none', cursor: 'pointer' }}
                 >
                   Cancelar
