@@ -33,12 +33,30 @@ export default function GameDesignMap({ userId, projectId, supabase }: MapProps)
   const [isEditingSession, setIsEditingSession] = useState(false);
   const [sessionTitle, setSessionTitle] = useState('');
   const [sessionColor, setSessionColor] = useState('#3b82f6');
+  
+  // Estados para as Imagens e Links nas Tips
+  const [newImageUrl, setNewImageUrl] = useState('');
+  const [newLinkUrl, setNewLinkUrl] = useState('');
+
+  // Estados para o Editor de Linhas (Edges)
+  const [isEditingEdge, setIsEditingEdge] = useState(false);
+  const [editingEdgeId, setEditingEdgeId] = useState<string | null>(null);
+  const [edgeColor, setEdgeColor] = useState('#9ca3af');
+  const [edgeThickness, setEdgeThickness] = useState(2);
 
   const router = useRouter();
 
   // ==========================================
   // FUNÇÕES DE AÇÃO DO CARD
   // ==========================================
+  const onEdgeDoubleClick = (event: any, edge: Edge) => {
+    event.stopPropagation();
+    setEditingEdgeId(edge.id);
+    setEdgeColor(edge.data?.color || '#9ca3af');
+    setEdgeThickness(edge.data?.thickness || 2);
+    setIsEditingEdge(true);
+  };
+
   const onNodeResizeStop = useCallback(async (_: any, node: Node) => {
     if (node.type === 'sessionNode') {
       await supabase
@@ -49,11 +67,16 @@ export default function GameDesignMap({ userId, projectId, supabase }: MapProps)
   }, [supabase]);
 
   const handleResizeEnd = async (nodeId: string, width: number, height: number) => {
-    const { error } = await supabase
-      .from('tips')
-      .update({ width, height })
-      .eq('id', nodeId);
-      
+    // A matemática mágica: Caixas maiores ficam mais no fundo (números negativos maiores)
+    const newZIndex = -Math.round((width * height) / 1000);
+    
+    setNodes(nds => nds.map(n => n.id === nodeId ? { 
+      ...n, 
+      style: { width, height },
+      zIndex: newZIndex // <-- Atualiza na hora!
+    } : n));
+    
+    const { error } = await supabase.from('tips').update({ width, height }).eq('id', nodeId);
     if (error) console.error('Erro ao salvar tamanho:', error);
   };
 
@@ -64,21 +87,36 @@ export default function GameDesignMap({ userId, projectId, supabase }: MapProps)
     setIsEditingSession(true);
   };
 
-  const handleDeleteNode = async (nodeId: string) => {
-    const { error } = await supabase.from('tips').delete().eq('id', nodeId);
-    if (error) {
-      console.error('Erro ao excluir:', error);
-      alert('Erro ao excluir a ideia.');
-      return;
-    }
-    setNodes((nds) => nds.filter((node) => node.id !== nodeId));
+  const handleToggleExpand = (nodeId: string, isExpanded: boolean) => {
+    setNodes(nds => nds.map(n => {
+      if (n.id === nodeId) {
+        return { ...n, zIndex: isExpanded ? 9999 : 10 }; // Fica acima de tudo!
+      }
+      return n;
+    }));
   };
 
-  const handleEditNode = (nodeId: string, currentTitle: string, currentContent: string, currentTags: string[]) => {
-    setEditingNodeId(nodeId);
-    setNewTitle(currentTitle);
-    setNewContent(currentContent || '');
-    setNewTags(currentTags ? currentTags.join(', ') : '');
+  const handleDeleteNode = async (nodeId: string) => {
+    // 1. Atualiza as Tips filhas para ficarem "órfãs" (parent_id nulo) no banco
+    await supabase.from('tips').update({ parent_id: null }).eq('parent_id', nodeId);
+    
+    // 2. Apaga o nó solicitado
+    const { error } = await supabase.from('tips').delete().eq('id', nodeId);
+    
+    if (!error) {
+      // 3. Limpa o mapa visualmente (remove o nó apagado e liberta os filhos)
+      setNodes((nds) => {
+        const remaining = nds.filter((n) => n.id !== nodeId);
+        return remaining.map(n => n.parentNode === nodeId ? { ...n, parentNode: undefined } : n);
+      });
+    } else {
+      console.error('Erro ao deletar:', error);
+    }
+  };
+
+  const handleEditNode = (id: string, title: string, content: string, tags: string[], imageUrl: string, linkUrl: string) => {
+    setEditingNodeId(id); setNewTitle(title); setNewContent(content); 
+    setNewTags(tags.join(', ')); setNewImageUrl(imageUrl); setNewLinkUrl(linkUrl); 
     setIsAdding(true);
   };
 
@@ -139,7 +177,7 @@ export default function GameDesignMap({ userId, projectId, supabase }: MapProps)
       // 1. Busca os Nós APENAS do projeto atual
       const { data: tipsData } = await supabase
         .from('tips')
-        .select(`id, title, content, position_x, position_y, tip_tags ( tags ( name ) ), node_type, width, height`)
+        .select(`id, title, content, position_x, position_y, tip_tags ( tags ( name ) ), node_type, width, height, parent_id, image_url, link_url`)
         .eq('project_id', projectId);
 
       const initialNodes: Node[] = (tipsData || []).map((tip: any) => {
@@ -148,19 +186,38 @@ export default function GameDesignMap({ userId, projectId, supabase }: MapProps)
         // Se for uma sessão, ela precisa renderizar por trás (zIndex: -1)
         const isSession = tip.node_type === 'sessionNode';
 
+        // === NOVO: Criamos uma lista com todos os IDs válidos que realmente existem no projeto
+        const validIds = new Set((tipsData || []).map((t: any) => t.id));
+
+        // Calcula o Z-Index na hora de carregar (Tips = 10, Sessões = Negativo pela Área)
+        let zIdx = 10;
+        if (isSession) {
+          const w = tip.width || 500;
+          const h = tip.height || 400;
+          zIdx = -Math.round((w * h) / 1000);
+        }
+
+        // === NOVO: Verifica se o pai da Tip realmente existe no projeto. Se não, fica null.
+        const safeParentId = tip.parent_id && validIds.has(tip.parent_id) ? tip.parent_id : undefined;
+
         return {
           id: tip.id,
           type: tip.node_type || 'customTip', // <-- Lê do banco
+          parentNode: safeParentId, // Hierarquia da Sessions sobre as Tips, sem parentId = Tip Orfã
+          zIndex: zIdx, // Z-Index para não bugar a hierarquia no workspace
           data: { 
             title: tip.title, 
             content: tip.content,
             tags: tagList,
             color: tip.color, // <-- Lê a cor do banco
+            imageUrl: tip.image_url,
+            linkUrl: tip.link_url,
             onDelete: handleDeleteNode,
             onEdit: handleEditNode,
             onSaveTemplate: handleSaveTemplate,
             onResizeEnd: handleResizeEnd,
-            onEditSession: handleEditSession // <-- Passa a função
+            onEditSession: handleEditSession,
+            onToggleExpand: handleToggleExpand
           },
           position: { 
             x: tip.position_x !== null ? tip.position_x : 250, 
@@ -168,7 +225,6 @@ export default function GameDesignMap({ userId, projectId, supabase }: MapProps)
           },
           // Aplica o tamanho apenas se existir no banco
           style: tip.width && tip.height ? { width: tip.width, height: tip.height } : undefined,
-          zIndex: isSession ? -1 : 0 // <-- Joga a sessão para trás
         };
       });
 
@@ -177,6 +233,7 @@ export default function GameDesignMap({ userId, projectId, supabase }: MapProps)
       // onde a "source_tip_id" pertence às tips deste projeto. 
       // Para simplificar a query via Supabase SDK, podemos puxar os IDs das tips carregadas:
       const loadedTipIds = (tipsData || []).map(t => t.id);
+      const { data: connectionsData } = await supabase.from('connections').select('*').eq('project_id', projectId);
       
       let initialEdges: Edge[] = [];
       if (loadedTipIds.length > 0) {
@@ -185,17 +242,22 @@ export default function GameDesignMap({ userId, projectId, supabase }: MapProps)
           .select('*')
           .in('source_tip_id', loadedTipIds); // <--- Busca só as conexões dessas tips
           
-        initialEdges = (connectionsData || []).map((conn) => ({
-          id: conn.id,
-          source: conn.source_tip_id,
-          target: conn.target_tip_id,
-          animated: true,
-          style: { stroke: '#175e7a', strokeWidth: 2 }
-        }));
-      }
+      const initialEdges: Edge[] = (connectionsData || []).map((conn: any) => ({
+        id: conn.id,
+        source: conn.source_id,
+        target: conn.target_id,
+        sourceHandle: conn.source_handle,
+        targetHandle: conn.target_handle,
+        interactionWidth: 20, // Área de clique grossa
+        data: { color: conn.color, thickness: conn.thickness },
+        // INJETA O ESTILO DIRETO NA LINHA AQUI:
+        style: { stroke: conn.color || '#9ca3af', strokeWidth: conn.thickness || 2 }
+      }));
+      setEdges(initialEdges);
+    }
 
       // 3. Busca a lista da barra lateral (Tips Salvas)
-      const { data: savedData } = await supabase
+    const { data: savedData } = await supabase
         .from('tips')
         .select(`id, title, content, tip_tags ( tags ( name ) )`)
         .order('created_at', { ascending: false })
@@ -224,23 +286,151 @@ export default function GameDesignMap({ userId, projectId, supabase }: MapProps)
     }
   }, [supabase]);
 
-  const onNodesDelete = useCallback(async (deletedNodes: Node[]) => {
-    const idsToDelete = deletedNodes.map((node) => node.id);
-    const { error } = await supabase.from('tips').delete().in('id', idsToDelete);
-    if (error) console.error('Erro ao deletar Tip:', error);
-  }, [supabase]);
+  // Essa função é chamada automaticamente quando você aperta a tecla DELETE no teclado
+  const onNodesDelete = async (deletedNodes: Node[]) => {
+    // Separa quem o usuário realmente clicou vs quem o React Flow quer apagar por osmose
+    const rescuedNodes = deletedNodes.filter(n => !n.selected);
 
-  const onEdgesDelete = useCallback(async (deletedEdges: Edge[]) => {
-    const idsToDelete = deletedEdges.map((edge) => edge.id);
-    const { error } = await supabase.from('tip_connections').delete().in('id', idsToDelete);
-    if (error) console.error('Erro ao deletar conexão:', error);
-  }, [supabase]);
+    for (const node of deletedNodes) {
+      if (!node.selected) {
+        // RESGATE: É uma Tip que estava dentro da sessão excluída. 
+        // Avisa o banco que ela agora é órfã (mas NÃO DELETA)
+        await supabase.from('tips').update({ parent_id: null }).eq('id', node.id);
+        continue;
+      }
 
-  const onNodeDragStop = useCallback(async (event: React.MouseEvent, node: Node) => {
-    const { x, y } = node.position;
-    const { error } = await supabase.from('tips').update({ position_x: x, position_y: y }).eq('id', node.id);
-    if (error) console.error('Erro ao salvar nova posição:', error);
-  }, [supabase]);
+      // EXCLUSÃO REAL: O nó que o usuário clicou para apagar
+      await supabase.from('tips').update({ parent_id: null }).eq('parent_id', node.id);
+      await supabase.from('tips').delete().eq('id', node.id);
+    }
+
+    // Devolve as Tips salvas para a interface visual
+    if (rescuedNodes.length > 0) {
+      setNodes(nds => {
+        const currentIds = nds.map(n => n.id);
+        const nodesToRestore = rescuedNodes
+          .filter(n => !currentIds.includes(n.id))
+          .map(n => ({ ...n, parentNode: undefined })); // Liberta do pai apagado
+        return [...nds, ...nodesToRestore];
+      });
+    }
+  };
+
+  const onEdgesDelete = async (deletedEdges: Edge[]) => {
+    for (const edge of deletedEdges) {
+      // Impede o banco de quebrar se o ID não for um UUID válido
+      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(edge.id);
+      if (isUUID) {
+        await supabase.from('connections').delete().eq('id', edge.id);
+      }
+    }
+  };
+
+const onNodeDragStop = async (event: any, node: Node) => {
+    // 1. Função Auxiliar: Descobrir a posição REAL na tela
+    // (Se um nó está dentro de outro, o X e Y dele ficam relativos ao pai, então precisamos somar tudo)
+    const getAbsPos = (n: Node) => {
+      let x = n.position.x;
+      let y = n.position.y;
+      let parentId = n.parentNode;
+      
+      while (parentId) {
+        const parent = nodes.find(p => p.id === parentId);
+        if (parent) {
+          x += parent.position.x;
+          y += parent.position.y;
+          parentId = parent.parentNode;
+        } else break;
+      }
+      return { x, y };
+    };
+
+    // 2. Função Auxiliar: Evitar buracos negros (Paradoxos)
+    // Impede que você coloque a "Sessão Pai" dentro da "Sessão Filha"
+    const isDescendant = (draggedId: string, potentialParentId: string) => {
+      let currentId = potentialParentId;
+      while (currentId) {
+        if (currentId === draggedId) return true;
+        const p = nodes.find(n => n.id === currentId);
+        currentId = p?.parentNode || '';
+      }
+      return false;
+    };
+
+    // 3. Pegar informações do nó que está sendo arrastado (Tip ou Sessão)
+    const absPos = getAbsPos(node);
+    const nodeW = node.type === 'sessionNode' ? (node.style?.width as number || 500) : 250;
+    const nodeH = node.type === 'sessionNode' ? (node.style?.height as number || 400) : 150;
+    
+    // Calcula exatamente o ponto central do card sendo arrastado
+    const centerX = absPos.x + (nodeW / 2);
+    const centerY = absPos.y + (nodeH / 2);
+
+    // 4. Procura todas as Sessões que existem debaixo desse ponto central
+    const containingSessions = nodes.filter(n => {
+      // Ignora Tips e ignora a si mesmo
+      if (n.type !== 'sessionNode' || n.id === node.id) return false;
+      // Ignora se for criar um paradoxo
+      if (isDescendant(node.id, n.id)) return false; 
+
+      const sAbs = getAbsPos(n);
+      const sW = (n.style?.width as number) || 500;
+      const sH = (n.style?.height as number) || 400;
+
+      // Retorna true se o centro do nó arrastado caiu dentro dessa caixa
+      return centerX >= sAbs.x && centerX <= (sAbs.x + sW) && centerY >= sAbs.y && centerY <= (sAbs.y + sH);
+    });
+
+    let newParentId = undefined;
+    let finalX = absPos.x;
+    let finalY = absPos.y;
+
+    // 5. Se caiu dentro de sessões, precisamos achar a mais "profunda/menor"
+    if (containingSessions.length > 0) {
+      // Ordena pela área visual da caixa. A menor caixa engole o nó.
+      containingSessions.sort((a, b) => {
+        const areaA = ((a.style?.width as number) || 500) * ((a.style?.height as number) || 400);
+        const areaB = ((b.style?.width as number) || 500) * ((b.style?.height as number) || 400);
+        return areaA - areaB;
+      });
+      
+      const targetSession = containingSessions[0];
+      
+      // === ADICIONE ESTE IF PARA SATISFAZER O TYPESCRIPT ===
+      if (targetSession) {
+        newParentId = targetSession.id;
+        
+        // Converte a posição absoluta de volta para relativa em relação ao novo Pai
+        const targetAbs = getAbsPos(targetSession);
+        finalX = absPos.x - targetAbs.x;
+        finalY = absPos.y - targetAbs.y;
+      }
+    }
+
+    finalX = Math.round(finalX);
+    finalY = Math.round(finalY);
+
+    // 6. Atualiza a tela (React Flow)
+    setNodes(nds => nds.map(n => {
+      if (n.id === node.id) {
+        // Se ficou órfão (saiu de todas as sessões), removemos a propriedade parentNode
+        const { parentNode, ...rest } = n; 
+        return newParentId 
+          ? { ...rest, parentNode: newParentId, position: { x: finalX, y: finalY } }
+          : { ...rest, position: { x: finalX, y: finalY } };
+      }
+      return n;
+    }));
+
+    // 7. Salva a nova posição e hierarquia no Banco de Dados
+    const { error } = await supabase.from('tips').update({ 
+      position_x: finalX, 
+      position_y: finalY, 
+      parent_id: newParentId || null 
+    }).eq('id', node.id);
+
+    if (error) console.error('Erro ao salvar física no banco:', error);
+  };
 
   // ==========================================
   // FUNÇÕES DE DRAG AND DROP (Barra Lateral -> Mapa)
@@ -302,59 +492,68 @@ export default function GameDesignMap({ userId, projectId, supabase }: MapProps)
   // ==========================================
   // SALVAR / EDITAR MODAL
   // ==========================================
-  async function handleSaveTip() {
-    if (!newTitle.trim()) return alert('O título é obrigatório!');
+  const handleSaveTip = async () => {
     let currentTipId = editingNodeId;
-    const tagArray = newTags.split(',').map(t => t.trim()).filter(t => t !== '');
 
+    // 1. SALVA OU ATUALIZA A TIP NO BANCO
     if (editingNodeId) {
-      const { error } = await supabase.from('tips').update({ title: newTitle, content: newContent }).eq('id', editingNodeId);
+      const { error } = await supabase.from('tips')
+        .update({ title: newTitle, content: newContent, image_url: newImageUrl, link_url: newLinkUrl })
+        .eq('id', editingNodeId);
       if (error) return alert('Erro ao atualizar a ideia no banco.');
+      
       await supabase.from('tip_tags').delete().eq('tip_id', editingNodeId);
     } else {
-      const { data, error } = await supabase.from('tips').insert([{ title: newTitle, content: newContent, user_id: userId, project_id: projectId }]).select().single();
+      const { data, error } = await supabase.from('tips')
+        .insert([{ title: newTitle, content: newContent, user_id: userId, project_id: projectId, image_url: newImageUrl, link_url: newLinkUrl }])
+        .select().single();
       if (error) return alert('Erro ao salvar a ideia no banco.');
       currentTipId = data.id;
     }
 
-    if (currentTipId && tagArray.length > 0) {
-      for (const tagName of tagArray) {
-        let { data: tagData } = await supabase.from('tags').select('id').eq('name', tagName).single();
-        if (!tagData) {
-          const { data: newTagData } = await supabase.from('tags').insert([{ name: tagName }]).select().single();
-          tagData = newTagData;
-        }
-        if (tagData) await supabase.from('tip_tags').insert([{ tip_id: currentTipId, tag_id: tagData.id }]);
+    // 2. PROCESSA AS TAGS NO BANCO
+    const tagsArray = newTags.split(',').map((t) => t.trim()).filter((t) => t !== '');
+    for (const tagName of tagsArray) {
+      let tagId;
+      const { data: existingTag } = await supabase.from('tags').select('id').eq('name', tagName).single();
+      if (existingTag) {
+        tagId = existingTag.id;
+      } else {
+        const { data: newTag } = await supabase.from('tags').insert([{ name: tagName }]).select().single();
+        if (newTag) tagId = newTag.id;
       }
+      if (tagId) await supabase.from('tip_tags').insert([{ tip_id: currentTipId, tag_id: tagId }]);
     }
 
-    if (editingNodeId) {
-      setNodes((nds) => nds.map((n) => 
-        n.id === editingNodeId ? { ...n, data: { ...n.data, title: newTitle, content: newContent, tags: tagArray } } : n
-      ));
+    // 3. ATUALIZA A TELA (Tudo de uma vez: Texto, Mídia e Tags!)
+    setNodes((nds) => {
+      if (editingNodeId) {
+        // Atualiza o card existente
+        return nds.map((n) => n.id === currentTipId ? {
+          ...n,
+          data: { ...n.data, title: newTitle, content: newContent, tags: tagsArray, imageUrl: newImageUrl, linkUrl: newLinkUrl }
+        } : n);
       } else {
+        // Cria um card novo
         const newNode: Node = {
           id: currentTipId as string,
           type: 'customTip',
+          position: { x: 250, y: 150 },
+          zIndex: 10,
           data: { 
-            title: newTitle, 
-            content: newContent, 
-            tags: tagArray, 
-            onDelete: handleDeleteNode, 
-            onEdit: handleEditNode,
-            onSaveTemplate: handleSaveTemplate // <-- MAKE SURE THIS IS HERE
-          },
-          position: { x: 300, y: 100 },
+            title: newTitle, content: newContent, tags: tagsArray, imageUrl: newImageUrl, linkUrl: newLinkUrl,
+            onDelete: handleDeleteNode, onEdit: handleEditNode, onSaveTemplate: handleSaveTemplate, onToggleExpand: handleToggleExpand 
+          }
         };
-        setNodes((nds) => [...nds, newNode]);
+        return [...nds, newNode];
       }
+    });
 
+    // 4. LIMPA OS ESTADOS E FECHA O MODAL
     setIsAdding(false);
     setEditingNodeId(null);
-    setNewTitle('');
-    setNewContent('');
-    setNewTags('');
-  }
+    setNewTitle(''); setNewContent(''); setNewTags(''); setNewImageUrl(''); setNewLinkUrl('');
+  };
 
 return (
     <div style={{ display: 'flex', width: '100vw', height: '100vh', background: '#121212', color: '#fff' }}>
@@ -397,9 +596,14 @@ return (
                   id: data.id,
                   type: 'sessionNode',
                   position: { x: 100, y: 100 },
-                  data: { title: sessionName, onResizeEnd: handleResizeEnd }, // Passa a função
+                  data: { 
+                    title: sessionName, 
+                    onResizeEnd: handleResizeEnd,
+                    onEditSession: handleEditSession,
+                    onToggleExpand: handleToggleExpand
+                  }, // Passa a função
                   style: { width: 500, height: 400 },
-                  zIndex: -1
+                  zIndex: -200
                 };
                 setNodes((nds) => [...nds, newSession]);
               }
@@ -465,9 +669,14 @@ return (
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
           onNodesDelete={onNodesDelete}
+          onNodeResizeStop={onNodeResizeStop}
           onEdgesDelete={onEdgesDelete}
           onNodeDragStop={onNodeDragStop}
+          onEdgeDoubleClick={onEdgeDoubleClick}
           fitView
+          minZoom={0.05}
+          maxZoom={4}
+          connectionMode="loose"
         >
           {/* Adicionando de volta o fundo pontilhado escuro */}
           <Background color="#555" gap={16} /> 
@@ -507,6 +716,8 @@ return (
             <input type="text" placeholder="Título da Ideia" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} style={{ padding: '10px', borderRadius: '4px', border: '1px solid #3f3f46', background: '#121212', color: '#fff' }} />
             <textarea placeholder="Descreva a mecânica, história, etc..." value={newContent} onChange={(e) => setNewContent(e.target.value)} style={{ padding: '10px', borderRadius: '4px', border: '1px solid #3f3f46', background: '#121212', color: '#fff', minHeight: '100px', resize: 'vertical' }} />
             <input type="text" placeholder="Tags (separadas por vírgula)" value={newTags} onChange={(e) => setNewTags(e.target.value)} style={{ padding: '10px', borderRadius: '4px', border: '1px solid #3f3f46', background: '#121212', color: '#fff' }} />
+            <input type="text" placeholder="URL da Imagem (Ex: https://...)" value={newImageUrl} onChange={(e) => setNewImageUrl(e.target.value)} style={{ padding: '10px', borderRadius: '4px', border: '1px solid #3f3f46', background: '#121212', color: '#fff' }} />
+            <input type="text" placeholder="Link de Referência (Ex: https://...)" value={newLinkUrl} onChange={(e) => setNewLinkUrl(e.target.value)} style={{ padding: '10px', borderRadius: '4px', border: '1px solid #3f3f46', background: '#121212', color: '#fff' }} />
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '8px' }}>
               <button onClick={() => { setIsAdding(false); setEditingNodeId(null); }} style={{ padding: '8px 16px', background: 'transparent', color: '#9ca3af', border: '1px solid #3f3f46', borderRadius: '4px', cursor: 'pointer' }}>Cancelar</button>
               <button onClick={handleSaveTip} style={{ padding: '8px 16px', background: '#eab308', color: '#000', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>Salvar</button>
@@ -538,6 +749,40 @@ return (
                   setEditingNodeId(null);
                 }} 
                 style={{ padding: '8px 16px', background: '#eab308', color: '#000', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>Salvar</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* MODAL DE EDIÇÃO DE CONEXÃO (LINHA) */}
+      {isEditingEdge && (
+        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0, 0, 0, 0.75)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 9999 }}>
+          <div style={{ background: '#1e1e24', width: '350px', padding: '24px', borderRadius: '8px', border: '1px solid #3f3f46', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <h3 style={{ margin: 0, fontSize: '18px', color: '#fff' }}>Estilo da Conexão</h3>
+            
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <label style={{ fontSize: '14px', color: '#9ca3af', width: '80px' }}>Cor:</label>
+              <input type="color" value={edgeColor} onChange={(e) => setEdgeColor(e.target.value)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', height: '30px', flex: 1 }} />
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <label style={{ fontSize: '14px', color: '#9ca3af', width: '80px' }}>Espessura: {edgeThickness}px</label>
+              <input type="range" min="1" max="10" value={edgeThickness} onChange={(e) => setEdgeThickness(Number(e.target.value))} style={{ flex: 1 }} />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '8px' }}>
+              <button onClick={() => setIsEditingEdge(false)} style={{ padding: '8px 16px', background: 'transparent', color: '#9ca3af', border: '1px solid #3f3f46', borderRadius: '4px', cursor: 'pointer' }}>Cancelar</button>
+              <button onClick={async () => {
+                await supabase.from('connections').update({ color: edgeColor, thickness: edgeThickness }).eq('id', editingEdgeId);
+                
+                // MÁGICA DA COR: Atualiza o 'style' junto com o 'data'
+                setEdges((eds) => eds.map((e) => e.id === editingEdgeId ? { 
+                  ...e, 
+                  data: { ...e.data, color: edgeColor, thickness: edgeThickness },
+                  style: { ...e.style, stroke: edgeColor, strokeWidth: edgeThickness } 
+                } : e));
+                
+                setIsEditingEdge(false);
+              }} style={{ padding: '8px 16px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>Salvar</button>
             </div>
           </div>
         </div>
