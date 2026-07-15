@@ -11,6 +11,7 @@ interface SessionNodeProps {
     color?: string;
     onResizeEnd?: (id: string, width: number, height: number) => void;
     onEditSession?: (id: string, currentTitle: string, currentColor: string) => void;
+    onSaveTemplate?: (id: string) => void;
   };
 }
 
@@ -51,12 +52,23 @@ function SessionNode({ id, data, selected }: SessionNodeProps) {
           justifyContent: 'space-between', alignItems: 'center'
         }}>
           {data.title}
-          <button 
-            onClick={(e) => { e.stopPropagation(); if (data.onEditSession) data.onEditSession(id, data.title, themeColor); }}
-            style={{ background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '12px' }}
-          >
-            ✏️ Editar
-          </button>
+          
+          {/* 2. Novo grupo de botões no cabeçalho */}
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <button 
+              onClick={(e) => { e.stopPropagation(); if (data.onSaveTemplate) data.onSaveTemplate(id); }}
+              style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '14px' }}
+              title="Salvar Sessão"
+            >
+              ⭐
+            </button>
+            <button 
+              onClick={(e) => { e.stopPropagation(); if (data.onEditSession) data.onEditSession(id, data.title, themeColor); }}
+              style={{ background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '12px' }}
+            >
+              ✏️ Editar
+            </button>
+          </div>
         </div>
       </div>
     </>
