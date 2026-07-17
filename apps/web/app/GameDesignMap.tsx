@@ -50,26 +50,46 @@ export default function GameDesignMap({ userId, projectId, supabase }: MapProps)
   const [sessionEditTitle, setSessionEditTitle] = useState('');
   const [sessionEditColor, setSessionEditColor] = useState('#3b82f6');
 
+  // Estados para a Playlist de Templates
+  const [isSavingTemplate, setIsSavingTemplate] = useState(false);
+  const [nodeIdToSave, setNodeIdToSave] = useState<string | null>(null);
+  const [playlistName, setPlaylistName] = useState('');
+
+  // Estados do "CTRL+F" no Mapa
+  const [mapSearch, setMapSearch] = useState('');
+  const [searchMatches, setSearchMatches] = useState<Node[]>([]);
+  const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
+
   const [reactFlowInstance, setReactFlowInstance] = useState<any>(null);
+  const [sidebarSearch, setSidebarSearch] = useState('');
 
   const router = useRouter();
+
+  // Estado para controlar quais playlists estão recolhidas (fechadas)
+  const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({});
+
+  // Função para alternar entre abrir e fechar a pasta
+  const toggleFolder = (folderName: string) => {
+    setCollapsedFolders(prev => ({
+      ...prev,
+      [folderName]: !prev[folderName] // Se era true vira false, se era false vira true
+    }));
+  };
 
   // =======================================================================
   // CARREGA A BARRA LATERAL (MEUS TEMPLATES / BLUEPRINTS)
   // =======================================================================
   useEffect(() => {
     const fetchSidebarTemplates = async () => {
-      // Busca apenas os nós que são marcados como template E que são "Raízes" (não têm pai)
       const { data: templates } = await supabase
         .from('tips')
-        .select('*')
+        // MÁGICA: Agora puxamos TUDO, idêntico à função de carregamento principal!
+        .select(`id, title, content, position_x, position_y, node_type, width, height, color, parent_id, image_url, link_url, playlist, tip_tags ( tags ( name ) ), is_template`)
         .eq('is_template', true)
-        .is('parent_id', null) // <--- O filtro mágico que esconde os filhos soltos!
+        .is('parent_id', null)
         .eq('user_id', userId);
 
-      if (templates) {
-        setSavedTipsList(templates);
-      }
+      if (templates) setSavedTipsList(templates);
     };
 
     // Só roda se tivermos o userId válido
@@ -149,45 +169,30 @@ export default function GameDesignMap({ userId, projectId, supabase }: MapProps)
   };
 
   const handleDeleteNode = async (nodeId: string) => {
-    // 1. Descobre quem é o pai e quais são os filhos (Antes de apagar qualquer coisa)
-    let idsToDelete = [nodeId];
-    let isSession = false;
+    let idsToDelete: string[] = [];
 
+    // 1. Mapeia TODOS os IDs (Pai e Filhos) e remove da tela instantaneamente
     setNodes(nds => {
-      const parentNode = nds.find(n => n.id === nodeId);
-      if (parentNode && parentNode.type === 'sessionNode') isSession = true;
-
-      const getChildren = (id: string): string[] => {
+      const getDescendants = (id: string): string[] => {
         const children = nds.filter(n => n.parentNode === id).map(n => n.id);
-        return children.reduce((acc, child) => [...acc, child, ...getChildren(child)], children);
+        return children.reduce((acc, child) => [...acc, child, ...getDescendants(child)], children);
       };
       
-      const childrenIds = getChildren(nodeId);
-      idsToDelete = [...idsToDelete, ...childrenIds];
-      return nds; // Apenas espiona, não muda a tela ainda!
+      idsToDelete = [nodeId, ...getDescendants(nodeId)];
+      
+      // O Segredo: Retorna a lista já filtrada, aniquilando todos ao mesmo tempo
+      return nds.filter(n => !idsToDelete.includes(n.id));
     });
 
-    // Se for uma Sessão, executa o plano de Aniquilação (Tudo Some!)
-    if (isSession) {
-        // 1. Apaga conexões locais na tela
-        setEdges(eds => eds.filter(e => !idsToDelete.includes(e.source) && !idsToDelete.includes(e.target)));
-        // 2. Apaga TODO MUNDO (Pai e Filhos) da tela instantaneamente
-        setNodes(nds => nds.filter(n => !idsToDelete.includes(n.id)));
-        
-        // 3. Limpeza Cascata no Banco (Sem esperar terminar)
-        supabase.from('tip_connections').delete().in('source_tip_id', idsToDelete).then();
-        supabase.from('tip_connections').delete().in('target_tip_id', idsToDelete).then();
-        supabase.from('tips').delete().in('id', idsToDelete).then();
-        return; 
-    }
+    // 2. Remove as linhas da tela
+    setEdges(eds => eds.filter(e => !idsToDelete.includes(e.source) && !idsToDelete.includes(e.target)));
 
-    // Se for apenas uma Tip normal...
-    setNodes(nds => nds.filter(n => n.id !== nodeId));
-    setEdges(eds => eds.filter(e => e.source !== nodeId && e.target !== nodeId));
-    
-    supabase.from('tip_connections').delete().eq('source_tip_id', nodeId).then();
-    supabase.from('tip_connections').delete().eq('target_tip_id', nodeId).then();
-    supabase.from('tips').delete().eq('id', nodeId).then();
+    // 3. Limpa o banco de dados silenciosamente
+    if (idsToDelete.length > 0) {
+      supabase.from('tip_connections').delete().in('source_tip_id', idsToDelete).then();
+      supabase.from('tip_connections').delete().in('target_tip_id', idsToDelete).then();
+      supabase.from('tips').delete().in('id', idsToDelete).then();
+    }
   };
 
   const handleEditNode = (id: string, title: string, content: string, tags: string[], imageUrl: string, linkUrl: string) => {
@@ -205,13 +210,21 @@ export default function GameDesignMap({ userId, projectId, supabase }: MapProps)
     });
   };
 
-  const handleSaveTemplate = async (nodeId: string) => {
+  const handleSaveTemplate = (nodeId: string) => {
+    setNodeIdToSave(nodeId);
+    setPlaylistName(''); // Zera para o próximo
+    setIsSavingTemplate(true);
+  };
+
+  const executeSaveTemplate = async () => {
+    if (!nodeIdToSave) return;
+    
     let currentNodes: Node[] = [];
     let currentEdges: Edge[] = [];
     setNodes(nds => { currentNodes = nds; return nds; });
     setEdges(eds => { currentEdges = eds; return eds; });
 
-    const rootNode = currentNodes.find(n => n.id === nodeId);
+    const rootNode = currentNodes.find(n => n.id === nodeIdToSave);
     if (!rootNode) return;
 
     const getDescendants = (parentId: string): Node[] => {
@@ -219,21 +232,16 @@ export default function GameDesignMap({ userId, projectId, supabase }: MapProps)
       return children.reduce((acc, child) => [...acc, child, ...getDescendants(child.id)], children);
     };
 
-    const rawNodesToSave = [rootNode, ...getDescendants(nodeId)];
-    
-    // BLINDAGEM 1: Remove duplicatas caso a árvore tenha referências circulares
+    const rawNodesToSave = [rootNode, ...getDescendants(nodeIdToSave)];
     const uniqueNodesToSave = Array.from(new Map(rawNodesToSave.map(n => [n.id, n])).values());
     const oldIds = uniqueNodesToSave.map(n => n.id);
-
     const edgesToSave = currentEdges.filter(e => oldIds.includes(e.source) && oldIds.includes(e.target));
 
     const idMap: Record<string, string> = {};
-    // BLINDAGEM 2: O crypto.randomUUID() é nativo do Next.js e 100% seguro contra colisões
     oldIds.forEach(id => idMap[id] = generateSafeId());
 
     const dbNodes = uniqueNodesToSave.map(n => {
       const isSess = n.type === 'sessionNode';
-      
       const rawWidth = n.style?.width || n.width || 500;
       const rawHeight = n.style?.height || n.height || 400;
       const safeWidth = isSess ? (Math.round(Number(String(rawWidth).replace('px', ''))) || 500) : null;
@@ -254,7 +262,9 @@ export default function GameDesignMap({ userId, projectId, supabase }: MapProps)
         link_url: n.data?.linkUrl || '',
         parent_id: n.id === rootNode.id ? null : (idMap[n.parentNode as string] || null), 
         position_x: Math.round(n.position.x || 0),
-        position_y: Math.round(n.position.y || 0)
+        position_y: Math.round(n.position.y || 0),
+        // === NOVO: Grava a playlist no nó principal do pacote ===
+        playlist: n.id === rootNode.id ? (playlistName.trim() || null) : null
       };
     });
 
@@ -268,7 +278,6 @@ export default function GameDesignMap({ userId, projectId, supabase }: MapProps)
       thickness: Math.round(Number(e.data?.thickness || 2))
     }));
 
-    // Inserção no banco
     const { error: errNodes } = await supabase.from('tips').insert(dbNodes);
     if (dbEdges.length > 0) await supabase.from('tip_connections').insert(dbEdges);
 
@@ -280,6 +289,11 @@ export default function GameDesignMap({ userId, projectId, supabase }: MapProps)
       console.error('Erro ao empacotar:', errNodes.message || errNodes);
       alert('Erro ao empacotar o template. Verifique o console.');
     }
+
+    // Fecha o modal
+    setIsSavingTemplate(false);
+    setPlaylistName('');
+    setNodeIdToSave(null);
   };
 
   const handleRemoveTemplate = async (templateId: string) => {
@@ -440,19 +454,14 @@ export default function GameDesignMap({ userId, projectId, supabase }: MapProps)
   }, [setEdges]);
 
   // Essa função é chamada automaticamente quando você aperta a tecla DELETE no teclado
-  const onNodesDelete = async (deletedNodes: Node[]) => {
-    // Quando o usuário dá Delete pelo teclado, o React Flow já apaga visualmente por padrão!
-    // Então, nossa única função aqui é limpar a sujeira no banco de dados.
-    
+  const onNodesDelete = useCallback((deletedNodes: Node[]) => {
     const idsToDelete = deletedNodes.map(n => n.id);
     if (idsToDelete.length === 0) return;
 
-    // Dispara a ordem de exclusão no Supabase (ON CASCADE Manual)
-    // O .then() faz a execução ir pro background, evitando travamentos na tela.
     supabase.from('tip_connections').delete().in('source_tip_id', idsToDelete).then();
     supabase.from('tip_connections').delete().in('target_tip_id', idsToDelete).then();
     supabase.from('tips').delete().in('id', idsToDelete).then();
-  };
+  }, []);
 
 const onNodeDragStop = async (event: any, node: Node) => {
     // 1. Função Auxiliar: Descobrir a posição REAL na tela
@@ -570,20 +579,21 @@ const onNodeDragStop = async (event: any, node: Node) => {
 
   const onDrop = useCallback(async (event: any) => {
     event.preventDefault();
-    const tipDataString = event.dataTransfer.getData('application/reactflow');
-    if (!tipDataString) return;
-    
-    const rootTemplate = JSON.parse(tipDataString);
+    if (!reactFlowInstance) return;
 
-    // Calcula onde o mouse soltou
-    const reactFlowBounds = document.querySelector('.react-flow')?.getBoundingClientRect();
-    let position = { x: event.clientX, y: event.clientY };
-    if (reactFlowInstance && reactFlowBounds) {
-      position = reactFlowInstance.project({
-        x: event.clientX - reactFlowBounds.left,
-        y: event.clientY - reactFlowBounds.top,
-      });
-    }
+    const data = event.dataTransfer.getData('application/reactflow');
+    if (!data) return;
+    const rootTemplate = JSON.parse(data);
+
+    // === MÁGICA 1: PEGA A COORDENADA EXATA DO MOUSE ===
+    const dropPosition = reactFlowInstance.screenToFlowPosition({
+      x: event.clientX,
+      y: event.clientY,
+    });
+
+    // Calcula a diferença entre onde o pacote estava salvo e onde o mouse está agora
+    const deltaX = dropPosition.x - rootTemplate.position_x;
+    const deltaY = dropPosition.y - rootTemplate.position_y;
 
     // 1. Busca TODO O ECOSSISTEMA de templates do usuário
     const { data: allTemplates } = await supabase.from('tips').select('*').eq('is_template', true).eq('user_id', userId);
@@ -609,38 +619,43 @@ const onNodeDragStop = async (event: any, node: Node) => {
     const idMap: Record<string, string> = {};
     oldIds.forEach(id => idMap[id] = generateSafeId()); // <-- AGORA USA A FERRAMENTA SEGURA
 
-    // 5. Prepara os Nós para existir de verdade no projeto atual
-    const dbNodesToInsert = nodesToInstantiate.map(t => ({
-      id: idMap[t.id],
-      title: t.title,
-      content: t.content,
-      user_id: userId,
-      project_id: Number(projectId), // Vincula ao projeto ativo
-      is_template: false,    // NÃO É MAIS TEMPLATE, É NÓ ATIVO!
-      node_type: t.node_type,
-      width: t.width,
-      height: t.height,
-      color: t.color,
-      image_url: t.image_url,
-      link_url: t.link_url,
-      parent_id: t.id === rootTemplate.id ? null : idMap[t.parent_id], // Raiz é livre, filhos ficam presos nela
-      // O truque da física: A raiz nasce onde o mouse tá. Os filhos usam posição relativa (local)!
-      position_x: t.id === rootTemplate.id ? Math.round(position.x) : t.position_x,
-      position_y: t.id === rootTemplate.id ? Math.round(position.y) : t.position_y
-    }));
+    // 5. Prepara os Nós (MÁGICA: Só movemos o nó raiz principal, os filhos viajam de carona!)
+    const dbNodesToInsert = nodesToInstantiate.map(t => {
+      const isRoot = t.id === rootTemplate.id; // Descobre se é o "Pai" do pacote
+
+      return {
+        id: idMap[t.id],
+        title: t.title,
+        content: t.content,
+        user_id: userId,
+        project_id: Number(projectId),
+        is_template: false,
+        node_type: t.node_type || 'customTip',
+        width: t.width,
+        height: t.height,
+        color: t.color,
+        image_url: t.image_url,
+        link_url: t.link_url,
+        parent_id: isRoot ? null : (idMap[t.parent_id] || null),
+        
+        // Aplica o Delta (mouse) SÓ no Pai. Filhos usam a coordenada interna pura.
+        position_x: isRoot ? Math.round(t.position_x + deltaX) : t.position_x,
+        position_y: isRoot ? Math.round(t.position_y + deltaY) : t.position_y
+      };
+    });
 
     // 6. Prepara as conexões reais lendo os pinos do pacote
     const dbEdgesToInsert = templateEdges.map(e => ({
       id: generateSafeId(),
       source_tip_id: idMap[e.source_tip_id],
       target_tip_id: idMap[e.target_tip_id],
-      // === NOVO: Puxa os pinos do pacote do banco ===
       source_handle: e.source_handle,
       target_handle: e.target_handle,
       color: e.color,
       thickness: e.thickness
     }));
 
+    // 7. INSERE NO BANCO E RASTREIA ERROS
     const { error: dropError } = await supabase.from('tips').insert(dbNodesToInsert);
     
     if (dropError) {
@@ -653,36 +668,54 @@ const onNodeDragStop = async (event: any, node: Node) => {
       await supabase.from('tip_connections').insert(dbEdgesToInsert);
     }
 
-    // Renderiza os nós na tela instantaneamente
-    const newReactNodes: Node[] = dbNodesToInsert.map(n => {
-      const isSess = n.node_type === 'sessionNode';
-      let zIdx = 10;
-      if (isSess) zIdx = -Math.round(((n.width || 500) * (n.height || 400)) / 1000); 
+    // 8. Renderiza os nós na tela instantaneamente
+    const newReactNodes: Node[] = nodesToInstantiate.map(t => {
+      const isSess = t.node_type === 'sessionNode';
+      const isRoot = t.id === rootTemplate.id; // Descobre se é o "Pai" do pacote
       
+      let zIdx = 10;
+      if (isSess) zIdx = -Math.round(((t.width || 500) * (t.height || 400)) / 1000); 
+      
+      const tagList = t.tip_tags?.map((tt: any) => tt.tags?.name).filter(Boolean) || [];
+
       return {
-        id: n.id as string,
-        type: n.node_type || 'customTip',
-        position: { x: n.position_x, y: n.position_y },
-        parentNode: (n.parent_id as string) || undefined,
+        id: idMap[t.id] as string, 
+        type: t.node_type || 'customTip',
+        
+        // A MESMA MÁGICA VISUAL: Delta só no pai!
+        position: { 
+          x: isRoot ? Math.round(t.position_x + deltaX) : t.position_x, 
+          y: isRoot ? Math.round(t.position_y + deltaY) : t.position_y 
+        },
+        
+        parentNode: isRoot ? undefined : (idMap[t.parent_id] as string), 
         zIndex: zIdx,
         data: {
-          title: n.title, content: n.content, color: n.color, imageUrl: n.image_url, linkUrl: n.link_url,
-          onDelete: handleDeleteNode, onEdit: handleEditNode, onSaveTemplate: handleSaveTemplate,
-          onResizeEnd: handleResizeEnd, onEditSession: handleEditSession, onToggleExpand: handleToggleExpand
+          title: t.title, 
+          content: t.content, 
+          color: t.color, 
+          imageUrl: t.image_url, 
+          linkUrl: t.link_url,
+          tags: tagList, 
+          onDelete: handleDeleteNode, 
+          onEdit: handleEditNode, 
+          onSaveTemplate: handleSaveTemplate,
+          onResizeEnd: handleResizeEnd, 
+          onEditSession: handleEditSession, 
+          onToggleExpand: handleToggleExpand
         },
-        style: isSess && n.width && n.height ? { width: n.width, height: n.height } : undefined
+        style: isSess && t.width && t.height ? { width: t.width, height: t.height } : undefined
       };
     });
     
-    // Renderiza as linhas na tela, agora COM OS PINOS E ANIMAÇÃO!
+    // Renderiza as linhas na tela com os pinos e animação
     const newReactEdges: Edge[] = dbEdgesToInsert.map(e => ({
       id: e.id, 
       source: e.source_tip_id as string, 
       target: e.target_tip_id as string, 
-      // === NOVO: Injeta no React Flow (O as string | null acalma o TypeScript) ===
       sourceHandle: e.source_handle as string | null,
       targetHandle: e.target_handle as string | null,
-      animated: true, // DEVOLVE A ANIMAÇÃO!
+      animated: true,
       interactionWidth: 20, 
       data: { color: e.color, thickness: e.thickness },
       style: { stroke: e.color || '#9ca3af', strokeWidth: e.thickness || 2 }
@@ -692,11 +725,24 @@ const onNodeDragStop = async (event: any, node: Node) => {
     setEdges(eds => eds.concat(newReactEdges));
   }, [reactFlowInstance, projectId, userId]); // Fim da função onDrop
 
+  // RADAR DA CÂMERA: Acha o centro exato da tela atual do usuário
+  const getCenterSpawnPosition = () => {
+    if (!reactFlowInstance) return { x: 250, y: 150 }; // Fallback seguro
+    
+    // Pega o meio da tela do navegador
+    const centerX = window.innerWidth / 2;
+    const centerY = window.innerHeight / 2;
+    
+    // Converte os pixels da tela para as coordenadas infinitas do mapa
+    return reactFlowInstance.screenToFlowPosition({ x: centerX, y: centerY });
+  };
+
   // ==========================================
   // SALVAR / EDITAR MODAL
   // ==========================================
   const handleSaveTip = async () => {
     let currentTipId = editingNodeId;
+    const spawnPos = getCenterSpawnPosition();
 
     // 1. SALVA OU ATUALIZA A TIP NO BANCO
     if (editingNodeId) {
@@ -741,7 +787,7 @@ const onNodeDragStop = async (event: any, node: Node) => {
         const newNode: Node = {
           id: currentTipId as string,
           type: 'customTip',
-          position: { x: 250, y: 150 },
+          position: { x: spawnPos.x - 125, y: spawnPos.y - 50},
           zIndex: 10,
           data: { 
             title: newTitle, content: newContent, tags: tagsArray, imageUrl: newImageUrl, linkUrl: newLinkUrl,
@@ -756,6 +802,58 @@ const onNodeDragStop = async (event: any, node: Node) => {
     setIsAdding(false);
     setEditingNodeId(null);
     setNewTitle(''); setNewContent(''); setNewTags(''); setNewImageUrl(''); setNewLinkUrl('');
+  };
+
+  // ==========================================
+  // Barra de Pesquisa no Workspace
+  // ==========================================
+  // Procura os nós no mapa e foca no primeiro
+  const handleMapSearch = (query: string) => {
+    setMapSearch(query);
+    if (!query.trim()) {
+      setSearchMatches([]);
+      return;
+    }
+    
+    const matches = nodes.filter(n => 
+      n.data?.title?.toLowerCase().includes(query.toLowerCase()) ||
+      n.data?.content?.toLowerCase().includes(query.toLowerCase())
+    );
+    
+    setSearchMatches(matches);
+    setCurrentMatchIndex(0);
+
+    // MÁGICA AQUI: "as Node" acalma o TypeScript
+    if (matches.length > 0) focusOnNode(matches[0] as Node); 
+  };
+
+  // Anima a câmera do React Flow até o nó
+  const focusOnNode = (node: Node) => {
+    if (!reactFlowInstance) return;
+    
+    // Foca a câmera no nó com animação de 800ms
+    reactFlowInstance.fitView({ 
+      nodes: [{ id: node.id }], 
+      duration: 800, 
+      maxZoom: 1.2 
+    });
+
+    // Destaca o nó selecionando ele (fica com a bordinha branca nativa)
+    setNodes(nds => nds.map(n => ({ ...n, selected: n.id === node.id })));
+  };
+
+  const nextMatch = () => {
+    if (searchMatches.length === 0) return;
+    const nextIndex = (currentMatchIndex + 1) % searchMatches.length;
+    setCurrentMatchIndex(nextIndex);
+    focusOnNode(searchMatches[nextIndex] as Node); // <-- AQUI
+  };
+
+  const prevMatch = () => {
+    if (searchMatches.length === 0) return;
+    const prevIndex = (currentMatchIndex - 1 + searchMatches.length) % searchMatches.length;
+    setCurrentMatchIndex(prevIndex);
+    focusOnNode(searchMatches[prevIndex] as Node); // <-- E AQUI
   };
 
 return (
@@ -836,45 +934,121 @@ return (
             Sessões 📦
           </button>
         </div>
+        
+        <h3 style={{ color: '#fff', margin: 0 }}>Biblioteca</h3>
+
+        {/* BARRA DE PESQUISA DA BIBLIOTECA */}
+        <input 
+          type="text" 
+          placeholder="Pesquisar salvos..." 
+          value={sidebarSearch}
+          onChange={(e) => setSidebarSearch(e.target.value)}
+          style={{ padding: '8px', borderRadius: '4px', border: '1px solid #3f3f46', background: '#121212', color: '#fff', width: '100%' }} 
+        />
 
         {/* LISTA FILTRADA DE TEMPLATES SALVOS */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', overflowY: 'auto', flex: 1 }} className="custom-scroll">
-          {savedTipsList
-            .filter(tip => sidebarTab === 'tips' ? tip.node_type !== 'sessionNode' : tip.node_type === 'sessionNode')
-            .map((tip) => (
-              <div key={tip.id} style={{ position: 'relative' }}>
-                
-                <button onClick={() => handleRemoveTemplate(tip.id)} style={{ position: 'absolute', top: '-6px', right: '-6px', background: '#ef4444', color: '#fff', border: 'none', borderRadius: '50%', width: '20px', height: '20px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer', zIndex: 11 }}>X</button>
+          {/* LÓGICA DE AGRUPAMENTO COM PASTAS RETRÁTEIS */}
+        {Object.entries(
+          savedTipsList
+            .filter(template => {
+              if (sidebarTab === 'sessions') return template.node_type === 'sessionNode';
+              return template.node_type !== 'sessionNode';
+            })
+            .filter(template => template.title.toLowerCase().includes(sidebarSearch.toLowerCase()))
+            .reduce((acc, template) => {
+              const folder = template.playlist || 'Itens Soltos';
+              if (!acc[folder]) acc[folder] = [];
+              acc[folder].push(template);
+              return acc;
+            }, {} as Record<string, any[]>)
+        ).map(([folderName, items]: any) => {
+          
+          // Verifica se esta pasta específica está na lista de "fechadas"
+          const isCollapsed = collapsedFolders[folderName];
 
-                <div 
-                  draggable 
-                  onDragStart={(e) => onDragStart(e, tip)}
-                  style={{ 
-                    background: '#1e1e24', padding: '12px', borderRadius: '8px', cursor: 'grab', color: '#fff',
-                    // Muda a borda para refletir visualmente se é Tip (Azul) ou Sessão (Amarelo)
-                    border: tip.node_type === 'sessionNode' ? '1px dashed #eab308' : '1px solid #333' 
-                  }}
-                >
-                  <strong style={{ display: 'block', marginBottom: '8px', color: tip.node_type === 'sessionNode' ? '#eab308' : '#3b82f6' }}>{tip.title}</strong>
-                  
-                  {/* Se for sessão, mostra as dimensões, senão mostra o conteúdo */}
-                  {tip.node_type === 'sessionNode' ? (
-                    <div style={{ fontSize: '11px', color: '#9ca3af', display: 'flex', gap: '8px' }}>
-                      <span>Tamanho: {tip.width}x{tip.height}</span>
+          return (
+            <div key={folderName} style={{ marginBottom: '16px' }}>
+              
+              {/* TÍTULO DA PLAYLIST (Agora é um botão clicável) */}
+              <h4 
+                onClick={() => toggleFolder(folderName)}
+                style={{ 
+                  color: '#fbbf24', 
+                  margin: '0 0 8px 0', 
+                  fontSize: '14px', 
+                  borderBottom: '1px solid #3f3f46', 
+                  paddingBottom: '4px',
+                  cursor: 'pointer', // Muda o mouse para a mãozinha
+                  display: 'flex', 
+                  justifyContent: 'space-between', // Joga a setinha pro canto direito
+                  alignItems: 'center',
+                  userSelect: 'none' // Evita que o texto fique azul de seleção ao clicar rápido
+                }}
+              >
+                <span>{isCollapsed ? '📁' : '📂'} {folderName} ({items.length})</span>
+                <span style={{ fontSize: '10px', color: '#9ca3af' }}>{isCollapsed ? '▼' : '▲'}</span>
+              </h4>
+              
+              {/* ITENS DENTRO DA PLAYLIST (Só renderiza se a pasta NÃO estiver fechada) */}
+              {!isCollapsed && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {items.map((tip: any) => (
+                    <div
+                      key={tip.id}
+                      draggable
+                      onDragStart={(e) => { 
+                        e.dataTransfer.setData('application/reactflow', JSON.stringify(tip)); 
+                        e.dataTransfer.effectAllowed = 'move'; 
+                      }}
+                      style={{ 
+                        padding: '12px', 
+                        background: '#27272a', 
+                        borderRadius: '6px', 
+                        cursor: 'grab', 
+                        borderLeft: tip.node_type === 'sessionNode' ? '4px solid #ef4444' : '4px solid #3b82f6' 
+                      }}
+                    >
+                      <div style={{ fontWeight: 'bold', color: '#fff', fontSize: '14px' }}>{tip.title}</div>
+                      <div style={{ fontSize: '12px', color: '#9ca3af', marginTop: '4px' }}>
+                        {tip.node_type === 'sessionNode' ? '📦 Pacote de Sessão' : '💡 Tip Avulsa'}
+                      </div>
+                      <button 
+                        onClick={() => handleRemoveTemplate(tip.id)} 
+                        style={{ marginTop: '8px', padding: '4px 8px', background: '#ef4444', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', width: '100%' }}
+                      >
+                        Excluir
+                      </button>
                     </div>
-                  ) : (
-                    <div style={{ fontSize: '12px', color: '#888', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {tip.content || 'Sem descrição...'}
-                    </div>
-                  )}
+                  ))}
                 </div>
-              </div>
-          ))}
+              )}
+            </div>
+          );
+        })}
         </div>
       </div>
 
       {/* CENTRO: React Flow Workspace */}
       <div style={{ flex: 1, position: 'relative' }} onDrop={onDrop} onDragOver={onDragOver}>
+        {/* BARRA DE PESQUISA FLUTUANTE (CTRL+F) */}
+        <div style={{ position: 'absolute', top: '16px', right: '16px', zIndex: 10, display: 'flex', gap: '8px', background: '#1e1e24', padding: '8px', borderRadius: '8px', border: '1px solid #3f3f46', boxShadow: '0 4px 6px rgba(0,0,0,0.3)' }}>
+          <input 
+            type="text" 
+            placeholder="Pesquisar no mapa..." 
+            value={mapSearch}
+            onChange={(e) => handleMapSearch(e.target.value)}
+            style={{ padding: '6px 12px', borderRadius: '4px', border: '1px solid #3f3f46', background: '#121212', color: '#fff', outline: 'none' }} 
+          />
+          
+          {searchMatches.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#9ca3af', fontSize: '14px' }}>
+              <span>{currentMatchIndex + 1} / {searchMatches.length}</span>
+              <button onClick={prevMatch} style={{ background: '#3f3f46', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer' }}>▲</button>
+              <button onClick={nextMatch} style={{ background: '#3f3f46', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer' }}>▼</button>
+            </div>
+          )}
+        </div>
         <ReactFlow
           onInit={setReactFlowInstance}
           nodes={nodes}
@@ -891,6 +1065,10 @@ return (
           minZoom={0.05}
           maxZoom={4}
           connectionMode={ConnectionMode.Loose}
+          elementsSelectable={true}
+          selectionOnDrag={false} // Mantém o clique esquerdo para arrastar a câmera
+          selectionKeyCode="Shift" // Segure SHIFT + Clique e Arraste para desenhar a caixa de seleção!
+          multiSelectionKeyCode={['Control', 'Meta', 'Shift']} // CTRL ou SHIFT + Clique para selecionar um por um
         >
           {/* Adicionando de volta o fundo pontilhado escuro */}
           <Background color="#555" gap={16} /> 
@@ -900,7 +1078,7 @@ return (
 
       {/* PAINEL DIREITO: AI Companion (Charles) */}
       <div style={{ width: '300px', background: '#1e1e24', borderLeft: '1px solid #2a2a35', padding: '16px', display: 'flex', flexDirection: 'column', zIndex: 10 }}>
-        <h3 style={{ fontSize: '16px', borderBottom: '1px solid #333', paddingBottom: '8px', marginBottom: '16px', color: '#eab308' }}>✨ AI Companion</h3>
+        <h3 style={{ fontSize: '16px', borderBottom: '1px solid #333', paddingBottom: '8px', marginBottom: '16px', color: '#eab308' }}>✨ AI Companion (In Progress)</h3>
         <button style={{ padding: '10px', background: '#eab308', color: '#000', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', marginBottom: '24px' }}>Analisar Projeto</button>
         <div style={{ background: '#2a2a35', padding: '12px', borderRadius: '6px', fontSize: '13px', lineHeight: '1.6', color: '#d1d5db' }}>
           <p style={{ margin: '0 0 8px 0', fontWeight: 'bold' }}>The gameplay sucks</p>
@@ -1001,9 +1179,39 @@ return (
           </div>
         </div>
       )}
+      {/* MODAL DE PLAYLIST */}
+      {isSavingTemplate && (
+        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0, 0, 0, 0.75)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 9999 }}>
+          <div style={{ background: '#1e1e24', width: '350px', padding: '24px', borderRadius: '8px', border: '1px solid #3f3f46', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <h3 style={{ margin: 0, fontSize: '18px', color: '#fff' }}>Salvar nos Favoritos ⭐</h3>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <label style={{ fontSize: '14px', color: '#9ca3af' }}>Nome da Playlist (Opcional):</label>
+              <input 
+                type="text" 
+                placeholder="Ex: Histórias, Personagens..."
+                value={playlistName} 
+                onChange={(e) => setPlaylistName(e.target.value)} 
+                style={{ padding: '10px', borderRadius: '4px', border: '1px solid #3f3f46', background: '#121212', color: '#fff' }} 
+              />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '8px' }}>
+              <button onClick={() => setIsSavingTemplate(false)} style={{ padding: '8px 16px', background: 'transparent', color: '#9ca3af', border: '1px solid #3f3f46', borderRadius: '4px', cursor: 'pointer' }}>Cancelar</button>
+              <button onClick={executeSaveTemplate} style={{ padding: '8px 16px', background: '#fbbf24', color: '#000', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>Salvar</button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* MODAL DE EDIÇÃO DE SESSÃO */}
       {isEditingSession && (
-        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0, 0, 0, 0.75)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 9999 }}>
+        <div 
+          style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0, 0, 0, 0.75)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 9999 }}
+          // === ESCUDO ANTI-SEQUESTRO DE FOCO ===
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
           <div style={{ background: '#1e1e24', width: '350px', padding: '24px', borderRadius: '8px', border: '1px solid #3f3f46', display: 'flex', flexDirection: 'column', gap: '16px' }}>
             <h3 style={{ margin: 0, fontSize: '18px', color: '#fff' }}>Editar Sessão</h3>
             

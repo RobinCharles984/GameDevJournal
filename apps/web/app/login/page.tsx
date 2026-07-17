@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback, memo } from 'react';
 import { useRouter } from 'next/navigation';
-import ReactFlow, { Background, Controls, Handle, Position, addEdge, Edge, Node, applyNodeChanges, applyEdgeChanges, NodeChange, EdgeChange } from 'reactflow';
+import ReactFlow, { Background, Controls, Handle, Position, addEdge, Edge, Node, applyNodeChanges, applyEdgeChanges, NodeChange, EdgeChange, ConnectionMode } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { supabase } from '../supabase';
 
@@ -98,39 +98,43 @@ export default function LoginWorkspacePage() {
   const onConnect = useCallback(async (params: any) => {
     // 1. Cria a linha visualmente e pinta ela de branco brilhante
     const newEdge = { ...params, animated: true, style: { stroke: '#fff', strokeWidth: 3 } };
-    let currentEdges: Edge[] = [];
     
-    setEdges((eds) => {
-      currentEdges = addEdge(newEdge, eds);
-      return currentEdges;
-    });
+    // CORREÇÃO: Calcula o novo mapa de cabos PRIMEIRO, de forma síncrona
+    const nextEdges = addEdge(newEdge, edges);
+    setEdges(nextEdges); // Salva na tela depois
 
     const targetId = params.target; // Descobre em qual Gate o cabo foi plugado
 
     // ====================================================================
-    // REGRA 1: LOGIN COM GITHUB (Conexão Direta)
+    // REGRA 1: LOGIN COM GITHUB
     // ====================================================================
     if (params.source === 'node-github' && targetId === 'gate-login') {
       setSystemMsg({ text: 'Iniciando Handshake com GitHub...', type: 'info' });
       const { error } = await supabase.auth.signInWithOAuth({ provider: 'github' });
-      if (error) setSystemMsg({ text: error.message, type: 'error' });
+      
+      if (error) {
+        console.error("ERRO GITHUB:", error); // <-- Adicionado para você ver no F12
+        setSystemMsg({ text: error.message || 'Falha ao conectar no GitHub.', type: 'error' });
+      }
       return;
     }
 
     // ====================================================================
     // REGRA 2: LOGIN OU SIGNUP COM EMAIL E SENHA
     // ====================================================================
-    // Verifica se os cabos do Email e da Senha estão AMBOS plugados no mesmo Gate
-    const hasEmailConnected = currentEdges.some(e => e.source === 'node-email' && e.target === targetId);
-    const hasPassConnected = currentEdges.some(e => e.source === 'node-password' && e.target === targetId);
+    // CORREÇÃO: Lê a variável nextEdges que acabamos de calcular com certeza!
+    const hasEmailConnected = nextEdges.some(e => e.source === 'node-email' && e.target === targetId);
+    const hasPassConnected = nextEdges.some(e => e.source === 'node-password' && e.target === targetId);
 
     if (hasEmailConnected && hasPassConnected) {
       const email = creds.current.email;
       const password = creds.current.password;
 
+      // Debug: Mostra no console o que o cabo está puxando
+      console.log("Tentando autenticar com:", { email, password });
+
       if (!email || !password) {
         setSystemMsg({ text: 'Erro: Os nós estão vazios. Preencha e-mail e senha.', type: 'error' });
-        // Desconecta os cabos para o usuário tentar de novo
         setTimeout(() => setEdges([]), 1500); 
         return;
       }
@@ -139,30 +143,37 @@ export default function LoginWorkspacePage() {
       setSystemMsg({ text: 'Compilando credenciais...', type: 'info' });
 
       if (targetId === 'gate-login') {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) {
-          setSystemMsg({ text: error.message, type: 'error' });
+          console.error("ERRO LOGIN SUPABASE:", error); // <-- O VERDADEIRO MOTIVO VAI APARECER AQUI
+          
+          // Se o Supabase mandar "{}", nós forçamos uma mensagem amigável
+          const errorMessage = error.message === "{}" ? "Credenciais inválidas ou e-mail não confirmado." : error.message;
+          setSystemMsg({ text: errorMessage, type: 'error' });
+          
           setIsLoading(false);
           setEdges([]);
         } else {
           setSystemMsg({ text: 'Acesso Liberado! Entrando no Workspace...', type: 'success' });
-          router.push('/dashboard');
+          router.push('/dashboard'); // <-- Ajuste para a URL correta do seu workspace se precisar
         }
       } 
       
       else if (targetId === 'gate-signup') {
-        const { error } = await supabase.auth.signUp({ email, password });
+        const { data, error } = await supabase.auth.signUp({ email, password });
         if (error) {
-          setSystemMsg({ text: error.message, type: 'error' });
+          console.error("ERRO SIGNUP SUPABASE:", error); // <-- O VERDADEIRO MOTIVO VAI APARECER AQUI
+          
+          const errorMessage = error.message === "{}" ? "Erro no servidor. Tente usar uma senha mais forte." : error.message;
+          setSystemMsg({ text: errorMessage, type: 'error' });
         } else {
           setSystemMsg({ text: 'Conta criada! Mova os cabos para o portal ENTRAR.', type: 'success' });
-          // Apaga os cabos de criação para induzir o usuário a plugar no Login
           setEdges([]); 
         }
         setIsLoading(false);
       }
     }
-  }, [router]);
+  }, [edges, router]); // <-- edges adicionado nas dependências do useCallback
 
   return (
     <div style={{ width: '100vw', height: '100vh', background: '#0a0a0c', position: 'relative' }}>
@@ -189,7 +200,7 @@ export default function LoginWorkspacePage() {
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         fitView
-        connectionMode="loose" // Permite conectar de qualquer jeito criativo
+        connectionMode={ConnectionMode.Loose} // Permite conectar de qualquer jeito criativo
       >
         <Background color="#333" gap={24} size={2} />
       </ReactFlow>
