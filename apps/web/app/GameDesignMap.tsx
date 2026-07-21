@@ -63,6 +63,10 @@ export default function GameDesignMap({ userId, projectId, supabase }: MapProps)
   const [reactFlowInstance, setReactFlowInstance] = useState<any>(null);
   const [sidebarSearch, setSidebarSearch] = useState('');
 
+  // Estados do Agent Charles
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [aiFeedback, setAiFeedback] = useState<string>('');
+
   const router = useRouter();
 
   // Estado para controlar quais playlists estão recolhidas (fechadas)
@@ -97,6 +101,75 @@ export default function GameDesignMap({ userId, projectId, supabase }: MapProps)
       fetchSidebarTemplates();
     }
   }, [userId]);
+
+  // ==========================================
+  // FUNÇÕES Do AGENT
+  // ==========================================
+  // Essa função varre a tela e monta o pacote para enviar para a IA  
+  const compileProjectDataForAI = () => {
+    // 1. Pega as Sessões (As caixas maiores)
+    const sessions = nodes.filter(n => n.type === 'sessionNode').map(s => ({
+      id: s.id,
+      title: s.data.title || 'Sessão Sem Nome'
+    }));
+
+    // 2. Pega as Tips (Os cartões menores de conteúdo)
+    const tips = nodes.filter(n => n.type !== 'sessionNode').map(t => {
+      // Descobre se a Tip está dentro de alguma sessão
+      const parentSession = sessions.find(s => s.id === t.parentNode);
+      
+      return {
+        titulo: t.data.title,
+        conteudo: t.data.content,
+        tags: t.data.tags || [],
+        pertence_a_sessao: parentSession ? parentSession.title : 'Ideia Solta no Mapa'
+      };
+    });
+
+    // 3. Mapeia as conexões (Quem liga em quem)
+    const relationships = edges.map(e => {
+      const sourceNode = nodes.find(n => n.id === e.source);
+      const targetNode = nodes.find(n => n.id === e.target);
+      return `${sourceNode?.data.title || 'Desconhecido'} ---> conecta com ---> ${targetNode?.data.title || 'Desconhecido'}`;
+    });
+
+    // Retorna tudo como um JSON formatado em texto para a IA ler
+    return JSON.stringify({
+      resumo_do_projeto: "Mapa Estrutural do Jogo",
+      mecanicas_e_narrativas: tips,
+      fluxo_de_logica: relationships
+    }, null, 2);
+  };
+
+  const handleAnalyzeProject = async () => {
+    setIsAnalyzing(true);
+    setAiFeedback(''); // Limpa o log anterior
+
+    const payload = compileProjectDataForAI(); // Sua função que varre os nós
+
+    try {
+      const response = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectData: payload })
+      });
+
+      const data = await response.json();
+      
+      // Salva o texto Markdown devolvido pela IA
+      if (data.feedback) {
+        setAiFeedback(data.feedback);
+      } else {
+        setAiFeedback('Erro: O Agent retornou um formato inesperado.');
+      }
+      
+    } catch (error) {
+      console.error("Falha na API:", error);
+      setAiFeedback('Erro ao estabelecer conexão com o núcleo de análise.');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
 
   // ==========================================
   // FUNÇÕES DE AÇÃO DO CARD
@@ -1076,17 +1149,64 @@ return (
         </ReactFlow>
       </div>
 
-      {/* PAINEL DIREITO: AI Companion (Charles) */}
-      <div style={{ width: '300px', background: '#1e1e24', borderLeft: '1px solid #2a2a35', padding: '16px', display: 'flex', flexDirection: 'column', zIndex: 10 }}>
-        <h3 style={{ fontSize: '16px', borderBottom: '1px solid #333', paddingBottom: '8px', marginBottom: '16px', color: '#eab308' }}>✨ AI Companion (In Progress)</h3>
-        <button style={{ padding: '10px', background: '#eab308', color: '#000', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', marginBottom: '24px' }}>Analisar Projeto</button>
-        <div style={{ background: '#2a2a35', padding: '12px', borderRadius: '6px', fontSize: '13px', lineHeight: '1.6', color: '#d1d5db' }}>
-          <p style={{ margin: '0 0 8px 0', fontWeight: 'bold' }}>The gameplay sucks</p>
-          <ul style={{ margin: 0, paddingLeft: '16px' }}>
-            <li style={{ marginBottom: '8px' }}>Card A and Card B have the same features.</li>
-            <li style={{ marginBottom: '8px' }}>Your story have a plot hole in Chapter 5 when blablabum but in Chapter 3 is bleblebam.</li>
-            <li>Want to generate a .tex document as a pitch?</li>
-          </ul>
+      {/* BARRA LATERAL DIREITA: AGENT CONSOLE */}
+      <div style={{ width: '350px', background: '#18181b', borderLeft: '1px solid #27272a', display: 'flex', flexDirection: 'column', zIndex: 10 }}>
+        
+        {/* Header do Agente */}
+        <div style={{ padding: '16px', borderBottom: '1px solid #27272a', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#1e1e24' }}>
+          <h3 style={{ color: '#fff', margin: 0, display: 'flex', alignItems: 'center', gap: '8px', fontSize: '16px' }}>
+            <span style={{ color: '#a855f7' }}>✧</span> Agent Charles
+          </h3>
+          <button
+            onClick={handleAnalyzeProject}
+            disabled={isAnalyzing}
+            style={{
+              background: isAnalyzing ? '#3f3f46' : '#a855f7',
+              color: isAnalyzing ? '#9ca3af' : '#fff',
+              border: 'none',
+              padding: '8px 12px',
+              borderRadius: '6px',
+              cursor: isAnalyzing ? 'not-allowed' : 'pointer',
+              fontWeight: 'bold',
+              fontSize: '12px',
+              transition: 'all 0.2s',
+              boxShadow: isAnalyzing ? 'none' : '0 4px 15px rgba(168, 85, 247, 0.3)'
+            }}
+          >
+            {isAnalyzing ? 'COMPILANDO...' : 'ANALISAR PROJETO'}
+          </button>
+        </div>
+
+        {/* Área de Log / Feedback (Scrollável) */}
+        <div style={{ flex: 1, padding: '16px', overflowY: 'auto', color: '#d1d5db', fontSize: '14px', lineHeight: '1.6' }}>
+          
+          {isAnalyzing ? (
+            // Tela de Carregamento Estilizada
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#a855f7', gap: '16px', textAlign: 'center' }}>
+              <div style={{ fontSize: '24px', animation: 'spin 2s linear infinite' }}>⚙️</div>
+              <div>
+                <strong style={{ display: 'block', color: '#fff' }}>Analisando Game Design...</strong>
+                <span style={{ fontSize: '12px', color: '#9ca3af' }}>Verificando dependências lógicas e mecânicas</span>
+              </div>
+              <style>{`@keyframes spin { 100% { transform: rotate(360deg); } }`}</style>
+            </div>
+          ) : aiFeedback ? (
+            // Resultado da Análise
+            <div style={{ 
+              whiteSpace: 'pre-wrap', // <-- ISSO É MÁGICA: Mantém as quebras de linha do GPT nativamente!
+              wordBreak: 'break-word' 
+            }}>
+              {aiFeedback}
+            </div>
+          ) : (
+            // Placeholder Inicial (Idle)
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', textAlign: 'center', color: '#52525b' }}>
+              <span style={{ fontSize: '32px', marginBottom: '16px', opacity: 0.5 }}>📊</span>
+              <p style={{ margin: 0 }}>O Agent está ocioso.</p>
+              <p style={{ fontSize: '12px', marginTop: '8px' }}>Clique em analisar para inspecionar os cartões da workspace e receber um Code Review de Game Design.</p>
+            </div>
+          )}
+          
         </div>
       </div>
 
