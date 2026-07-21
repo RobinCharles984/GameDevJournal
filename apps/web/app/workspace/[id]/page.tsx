@@ -5,7 +5,14 @@ import { useEffect, useState, use } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { useRouter } from 'next/navigation';
 import { supabase } from '../../supabase';
-import GameDesignMap from '../../GameDesignMap'; // Ajuste o caminho conforme necessário
+import dynamic from 'next/dynamic';
+
+// Isso força o Next.js a rodar o seu Workspace APENAS no navegador do usuário,
+// blindando ele contra os erros de servidor do jsPDF e do React Flow!
+const GameDesignMap = dynamic(() => import('../../GameDesignMap'), { 
+  ssr: false,
+  loading: () => <div style={{ color: '#a855f7', padding: '20px' }}>Carregando Engine Visual...</div>
+});
 
 // Atualizamos a tipagem para receber uma Promise
 export default function WorkspacePage(props: { params: Promise<{ id: string }> }) {

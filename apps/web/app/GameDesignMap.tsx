@@ -1,16 +1,67 @@
 'use client';
 
-import { useEffect, useState, useCallback, useMemo } from 'react';
-import ReactFlow, { Background, Controls, applyNodeChanges, applyEdgeChanges, NodeChange, EdgeChange, Node, Edge, addEdge, Connection, ConnectionMode } from 'reactflow';
+import { useEffect, useState, useCallback, useMemo, memo } from 'react';
+import ReactFlow, { Background, Controls, applyNodeChanges, applyEdgeChanges, NodeChange, EdgeChange, Node, Edge, addEdge, Connection, ConnectionMode, getViewportForBounds } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { SupabaseClient } from '@supabase/supabase-js';
 import TipNode from './TipNode';
 import SessionNode from './SessionNode';
 import { useRouter } from 'next/navigation';
+import { NodeResizer } from 'reactflow';
+import { toPng } from 'html-to-image';
+
+// Nó de Frame (Estilo Miro/Figma)
+// Nó de Frame Editável
+const FrameNode = memo(({ id, data, selected }: any) => {
+  return (
+    <>
+      <NodeResizer 
+        color="#a855f7" 
+        isVisible={selected} 
+        minWidth={300} 
+        minHeight={300} 
+      />
+      
+      <div style={{
+        width: '100%',
+        height: '100%',
+        background: 'rgba(255, 255, 255, 0.02)',
+        border: selected ? '2px solid #a855f7' : '2px dashed #52525b',
+        borderRadius: '8px',
+        position: 'relative',
+      }}>
+        {/* Etiqueta Editável (Input) */}
+        <input
+          type="text"
+          value={data.title}
+          onChange={(e) => data.onRename && data.onRename(id, e.target.value)}
+          className="nodrag" // IMPORTANTE: Permite clicar no texto sem arrastar o mapa
+          style={{
+            position: 'absolute',
+            top: '-32px',
+            left: '-2px',
+            background: selected ? '#a855f7' : '#52525b',
+            color: '#fff',
+            padding: '4px 16px',
+            borderRadius: '6px 6px 0 0',
+            fontSize: '14px',
+            fontWeight: 'bold',
+            letterSpacing: '1px',
+            border: 'none',
+            outline: 'none',
+            minWidth: '200px', // Evita que a aba fique muito pequena
+            transition: 'background 0.2s'
+          }}
+        />
+      </div>
+    </>
+  );
+});
 
 const nodeTypes = {
   customTip: TipNode,
   sessionNode: SessionNode,
+  frameNode: FrameNode
 };
 
 interface MapProps {
@@ -105,40 +156,221 @@ export default function GameDesignMap({ userId, projectId, supabase }: MapProps)
   // ==========================================
   // FUNÇÕES Do AGENT
   // ==========================================
+  // 1. Função para o Input do Frame conseguir mudar o nome em tempo real
+  const handleRenameFrame = useCallback((frameId: string, newTitle: string) => {
+    setNodes((nds) =>
+      nds.map((n) => {
+        if (n.id === frameId) {
+          return { ...n, data: { ...n.data, title: newTitle } };
+        }
+        return n;
+      })
+    );
+  }, [setNodes]);
+
+  // 2. Criação do Frame corrigida (Tamanho e Posição)
+  const handleAddFrame = () => {
+    // Tenta jogar para o meio da tela do usuário
+    const centerX = (window.innerWidth / 2) - 300; 
+    const centerY = (window.innerHeight / 2) - 250;
+
+    const newFrame = {
+      id: `frame-${Date.now()}`,
+      type: 'frameNode',
+      position: { x: centerX, y: centerY },
+      // ISSO AQUI RESOLVE O BUG DELE NASCER ENCOLHIDO:
+      style: { width: 600, height: 500 }, 
+      data: { title: 'Nova Área', onRename: handleRenameFrame },
+      zIndex: -10,
+    };
+    
+    setNodes((nds) => [...nds, newFrame]);
+  };
+
   // Essa função varre a tela e monta o pacote para enviar para a IA  
   const compileProjectDataForAI = () => {
-    // 1. Pega as Sessões (As caixas maiores)
-    const sessions = nodes.filter(n => n.type === 'sessionNode').map(s => ({
-      id: s.id,
-      title: s.data.title || 'Sessão Sem Nome'
-    }));
+    // 1. Descobre se há algum Frame selecionado pelo usuário
+    const selectedFrames = nodes.filter(n => n.type === 'frameNode' && n.selected);
+    const hasSelectedFrames = selectedFrames.length > 0;
 
-    // 2. Pega as Tips (Os cartões menores de conteúdo)
-    const tips = nodes.filter(n => n.type !== 'sessionNode').map(t => {
-      // Descobre se a Tip está dentro de alguma sessão
-      const parentSession = sessions.find(s => s.id === t.parentNode);
-      
-      return {
-        titulo: t.data.title,
-        conteudo: t.data.content,
-        tags: t.data.tags || [],
-        pertence_a_sessao: parentSession ? parentSession.title : 'Ideia Solta no Mapa'
-      };
-    });
+    // Função auxiliar matemática de colisão (Bounding Box)
+    const isInsideAnySelectedFrame = (nodePos: { x: number, y: number }) => {
+      if (!hasSelectedFrames) return true; // Se não tem frame selecionado, aprova tudo
 
-    // 3. Mapeia as conexões (Quem liga em quem)
+      return selectedFrames.some(frame => {
+        const fx = frame.position.x;
+        const fy = frame.position.y;
+        const fw = frame.width || 600;
+        const fh = frame.height || 500;
+        
+        // Verifica se a coordenada do nó está dentro do retângulo do frame
+        return (nodePos.x >= fx && nodePos.x <= fx + fw && nodePos.y >= fy && nodePos.y <= fy + fh);
+      });
+    };
+
+    // 2. Filtra Sessões e Tips, aplicando a regra de colisão
+    const sessions = nodes
+      .filter(n => n.type === 'sessionNode' && isInsideAnySelectedFrame(n.position))
+      .map(s => ({
+        id: s.id,
+        title: s.data.title || 'Sessão Sem Nome'
+      }));
+
+    const tips = nodes
+      .filter(n => n.type !== 'sessionNode' && n.type !== 'frameNode' && isInsideAnySelectedFrame(n.position))
+      .map(t => {
+        const parentSession = sessions.find(s => s.id === t.parentNode);
+        return {
+          titulo: t.data.title,
+          conteudo: t.data.content,
+          tags: t.data.tags || [],
+          pertence_a_sessao: parentSession ? parentSession.title : 'Ideia Solta no Mapa'
+        };
+      });
+
+    // 3. Mapeia conexões (Apenas entre nós que sobreviveram ao filtro)
+    const validNodeIds = [...sessions.map(s => s.id), ...tips.map(t => t.titulo)]; // Otimização simples
+    
     const relationships = edges.map(e => {
       const sourceNode = nodes.find(n => n.id === e.source);
       const targetNode = nodes.find(n => n.id === e.target);
-      return `${sourceNode?.data.title || 'Desconhecido'} ---> conecta com ---> ${targetNode?.data.title || 'Desconhecido'}`;
-    });
+      
+      // Só cria a relação se ambos os nós da ponta do cabo estiverem dentro do Frame
+      if (sourceNode && targetNode && isInsideAnySelectedFrame(sourceNode.position) && isInsideAnySelectedFrame(targetNode.position)) {
+        return `${sourceNode.data.title || 'Desconhecido'} ---> conecta com ---> ${targetNode.data.title || 'Desconhecido'}`;
+      }
+      return null;
+    }).filter(Boolean); // Remove os nulos
 
-    // Retorna tudo como um JSON formatado em texto para a IA ler
     return JSON.stringify({
-      resumo_do_projeto: "Mapa Estrutural do Jogo",
+      resumo_do_projeto: hasSelectedFrames ? "Recorte Específico do Jogo (Frame)" : "Mapa Estrutural Completo do Jogo",
       mecanicas_e_narrativas: tips,
       fluxo_de_logica: relationships
     }, null, 2);
+  };
+
+  // Motor de Exportação do Frame (A Solução Definitiva)
+  const handleExportFrame = async (format: 'png' | 'pdf') => {
+    const selectedFrame = nodes.find(
+      (n) => n.type === 'frameNode' && n.selected
+    );
+
+    if (!selectedFrame) {
+      alert('Selecione um Frame primeiro.');
+      return;
+    }
+
+    if (!reactFlowInstance) return;
+
+    const frameWidth = selectedFrame.width ?? 600;
+    const frameHeight = selectedFrame.height ?? 500;
+    const frameElement = document.querySelector(
+      `[data-id="${selectedFrame.id}"]`
+    ) as HTMLElement;
+    const oldVisibility = frameElement?.style.visibility;
+    if (frameElement) {
+      frameElement.style.visibility = 'hidden';
+    }
+
+    const frameX =
+      selectedFrame.positionAbsolute?.x ?? selectedFrame.position.x;
+
+    const frameY =
+      selectedFrame.positionAbsolute?.y ?? selectedFrame.position.y;
+
+    const viewportElement = document.querySelector(
+      '.react-flow__viewport'
+    ) as HTMLElement;
+
+    if (!viewportElement) return;
+
+    const originalViewport = reactFlowInstance.getViewport();
+
+    const controls = document.querySelector(
+      '.react-flow__controls'
+    ) as HTMLElement;
+
+    const originalControlsDisplay = controls?.style.display ?? '';
+
+    if (controls) controls.style.display = 'none';
+
+    try {
+      const viewport = getViewportForBounds(
+        {
+          x: frameX,
+          y: frameY,
+          width: frameWidth,
+          height: frameHeight,
+        },
+        frameWidth,
+        frameHeight,
+        0.1,
+        2
+      );
+
+      reactFlowInstance.setViewport(viewport);
+
+      await new Promise(requestAnimationFrame);
+      await new Promise(requestAnimationFrame);
+
+      const dataUrl = await toPng(viewportElement, {
+        backgroundColor: '#121212',
+        width: frameWidth,
+        height: frameHeight,
+        canvasWidth: frameWidth * 2,
+        canvasHeight: frameHeight * 2,
+        pixelRatio: 2,
+        cacheBust: true,
+
+        filter: (node) => {
+          if (!(node instanceof HTMLElement)) return true;
+
+          // Não desenha o próprio Frame
+          if (
+            node.classList.contains('frame-node') ||
+            node.dataset.type === 'frameNode'
+          ) {
+            return false;
+          }
+
+          return true;
+        }
+      });
+
+      if (frameElement) {
+        frameElement.style.visibility = oldVisibility;
+      }
+
+      const fileName =
+        selectedFrame.data?.title?.replace(/\s+/g, '_') ?? 'Frame_Exportado';
+
+      if (format === 'png') {
+        const link = document.createElement('a');
+        link.download = `${fileName}.png`;
+        link.href = dataUrl;
+        link.click();
+      } else {
+        const { default: jsPDF } = await import('jspdf');
+
+        const pdf = new jsPDF({
+          orientation: frameWidth > frameHeight ? 'landscape' : 'portrait',
+          unit: 'px',
+          format: [frameWidth, frameHeight],
+        });
+
+        pdf.addImage(dataUrl, 'PNG', 0, 0, frameWidth, frameHeight);
+        pdf.save(`${fileName}.pdf`);
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Erro ao exportar o Frame.');
+    } finally {
+      reactFlowInstance.setViewport(originalViewport);
+
+      if (controls) {
+        controls.style.display = originalControlsDisplay;
+      }
+    }
   };
 
   const handleAnalyzeProject = async () => {
@@ -942,6 +1174,46 @@ return (
         >
           ← Voltar
         </button>
+        {/* Botão de Adicionar Frame */}
+        <button
+          onClick={handleAddFrame}
+          style={{
+            background: '#27272a',
+            color: '#a855f7',
+            border: '1px solid #3f3f46',
+            padding: '8px 16px',
+            borderRadius: '6px',
+            cursor: 'pointer',
+            fontWeight: 'bold',
+            fontSize: '14px',
+            boxShadow: '0 4px 6px rgba(0,0,0,0.3)',
+            transition: 'all 0.2s'
+          }}
+          onMouseEnter={(e) => e.currentTarget.style.background = '#3f3f46'}
+          onMouseLeave={(e) => e.currentTarget.style.background = '#27272a'}
+        >
+          [ ] Adicionar Frame
+        </button>
+        {/* MÁGICA DE UX: Estes botões só aparecem se um Frame estiver selecionado */}
+        {nodes.some(n => n.type === 'frameNode' && n.selected) && (
+          <>
+            <div style={{ width: '1px', background: '#3f3f46', margin: '0 4px' }} /> {/* Linha separadora */}
+            
+            <button
+              onClick={() => handleExportFrame('png')}
+              style={{ background: '#10b981', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}
+            >
+              📸 Exportar PNG
+            </button>
+
+            <button
+              onClick={() => handleExportFrame('pdf')}
+              style={{ background: '#ef4444', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}
+            >
+              📄 Exportar PDF
+            </button>
+          </>
+        )}
           <button 
             onClick={() => { setEditingNodeId(null); setNewTitle(''); setNewContent(''); setNewTags(''); setIsAdding(true); }}
             style={{ padding: '8px', background: '#eab308', color: '#000', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', marginBottom: '8px' }}
