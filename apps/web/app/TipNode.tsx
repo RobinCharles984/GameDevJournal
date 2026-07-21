@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect, memo } from 'react';
 import { Handle, Position } from 'reactflow';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 interface TipNodeProps {
   id: string;
@@ -56,12 +58,37 @@ function TipNode({ id, data, selected }: TipNodeProps) {
       <Handle type="source" position={Position.Bottom} id="bottom" style={{ ...handleStyle, bottom: '-5px' }} />
       <Handle type="source" position={Position.Left} id="left" style={{ ...handleStyle, left: '-5px' }} />
       
-      {/* CORREÇÃO DO TÍTULO: whiteSpace, overflow e textOverflow forçam os '...' quando o texto é gigante */}
-      <div style={{ background: '#3b82f6', padding: '8px 12px', fontWeight: 'bold', fontSize: '14px', borderTopLeftRadius: '6px', borderTopRightRadius: '6px', borderBottom: '2px solid #2a2a35' }}>
-        <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', width: '100%' }} title={data.title}>
-          {data.title}
+      {/* TÍTULO DA TIP COM MARKDOWN INLINE */}
+        <div style={{ 
+          fontWeight: 'bold', 
+          color: '#ffffff', 
+          background: '#3b82f6',
+          padding: '8px 12px',
+          borderRadius: '6px 6px 0 0',
+          fontSize: '16px',
+          flex: 1 // Garante que ocupe o espaço correto ao lado de possíveis botões
+        }}>
+          {data.title ? (
+            <ReactMarkdown
+              components={{
+                // O SEGREDO: Transforma o parágrafo padrão em um texto contínuo
+                // para não quebrar o alinhamento da barra de título!
+                p: ({node, ...props}) => <span {...props} />,
+                
+                // Formatações permitidas no título
+                strong: ({node, ...props}) => <strong style={{ color: '#fbbf24' }} {...props} />, // Negrito fica amarelinho
+                em: ({node, ...props}) => <em style={{ fontStyle: 'italic' }} {...props} />,
+                code: ({node, ...props}) => (
+                  <code style={{ background: 'rgba(0,0,0,0.3)', padding: '2px 4px', borderRadius: '4px', fontSize: '12px' }} {...props} />
+                )
+              }}
+            >
+              {data.title}
+            </ReactMarkdown>
+          ) : (
+            'Nova Ideia'
+          )}
         </div>
-      </div>
       
       {/* IMAGEM DE CAPA */}
       {data.imageUrl && data.imageUrl.trim() !== '' && (
@@ -69,13 +96,39 @@ function TipNode({ id, data, selected }: TipNodeProps) {
       )}
 
       <div style={{ position: 'relative' }}>
-        <div ref={contentRef} className="nodrag nowheel custom-scroll" style={{ 
-            padding: '12px', fontSize: '13px', lineHeight: '1.5', color: '#d1d5db',
-            maxHeight: isExpanded ? '600px' : '160px', overflowY: isExpanded ? 'auto' : 'hidden',
-            transition: 'max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
-          }}>
-          {data.content ? data.content : <em style={{ color: '#6b7280' }}>Sem descrição...</em>}
-          
+        {/* ÁREA DO CONTEÚDO (Agora com motor Markdown) */}
+        <div 
+          className="markdown-container custom-scroll" 
+          style={{ 
+            padding: '12px', 
+            fontSize: '14px', 
+            color: '#d1d5db',
+            maxHeight: '200px', // Opcional: Evita que o cartão fique infinito
+            overflowY: 'auto'
+          }}
+        >
+          {data.content ? (
+            <ReactMarkdown 
+              remarkPlugins={[remarkGfm]}
+              components={{
+                // Estiliza os elementos do Markdown para o seu Tema Escuro nativamente
+                p: ({node, ...props}) => <p style={{ margin: '0 0 8px 0', lineHeight: '1.5' }} {...props} />,
+                a: ({node, ...props}) => <a style={{ color: '#3b82f6', textDecoration: 'none' }} target="_blank" rel="noopener noreferrer" {...props} />,
+                ul: ({node, ...props}) => <ul style={{ margin: '0 0 8px 0', paddingLeft: '20px' }} {...props} />,
+                ol: ({node, ...props}) => <ol style={{ margin: '0 0 8px 0', paddingLeft: '20px' }} {...props} />,
+                li: ({node, ...props}) => <li style={{ marginBottom: '4px' }} {...props} />,
+                strong: ({node, ...props}) => <strong style={{ color: '#fff' }} {...props} />,
+                // Estilo lindo para tabelas de RPG / Atributos
+                table: ({node, ...props}) => <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '8px' }} {...props} />,
+                th: ({node, ...props}) => <th style={{ borderBottom: '1px solid #52525b', padding: '4px', textAlign: 'left', color: '#fff' }} {...props} />,
+                td: ({node, ...props}) => <td style={{ borderBottom: '1px solid #3f3f46', padding: '4px' }} {...props} />,
+              }}
+            >
+              {data.content}
+            </ReactMarkdown>
+          ) : (
+            <span style={{ fontStyle: 'italic', color: '#52525b' }}>Sem conteúdo...</span>
+          )}
           {/* LINK EXTERNO */}
           {data.linkUrl && data.linkUrl.trim() !== '' && (
             <a href={data.linkUrl.startsWith('http') ? data.linkUrl : `https://${data.linkUrl}`} target="_blank" rel="noopener noreferrer" style={{ display: 'block', marginTop: '12px', padding: '8px', background: '#2563eb', color: '#fff', textAlign: 'center', textDecoration: 'none', borderRadius: '4px', fontWeight: 'bold' }}>
