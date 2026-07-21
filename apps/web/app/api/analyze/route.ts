@@ -1,12 +1,11 @@
 import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
 
-// Inicializa o cliente da OpenAI puxando a chave do seu .env.local
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
 export async function POST(req: Request) {
+  // Inicializa o cliente da OpenAI puxando a chave do seu .env.local
+  const openai = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+  });
   try {
     const body = await req.json();
     const { projectData } = body;
