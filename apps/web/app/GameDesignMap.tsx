@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useMemo, memo } from 'react';
-import ReactFlow, { Background, Controls, applyNodeChanges, applyEdgeChanges, NodeChange, EdgeChange, Node, Edge, addEdge, Connection, ConnectionMode, getViewportForBounds } from 'reactflow';
+import ReactFlow, { Background, Controls, applyNodeChanges, applyEdgeChanges, NodeChange, EdgeChange, Node, Edge, addEdge, useStore, ConnectionMode, getViewportForBounds } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { SupabaseClient } from '@supabase/supabase-js';
 import TipNode from './TipNode';
@@ -11,8 +11,17 @@ import { NodeResizer } from 'reactflow';
 import { toPng } from 'html-to-image';
 
 // Nó de Frame (Estilo Miro/Figma)
-// Nó de Frame Editável
+// O Seletor de Câmera
+const zoomSelector = (s: any) => s.transform[2];
+
+// Nó de Frame Editável (Com Zoom Semântico)
 const FrameNode = memo(({ id, data, selected }: any) => {
+  const zoom = useStore(zoomSelector);
+  
+  // Como o texto do Frame começa menor (14px), a escala dele precisa ser um pouco diferente
+  const isZoomedOut = zoom < 0.4;
+  const dynamicFontSize = isZoomedOut ? Math.min(14 * (0.4 / zoom), 100) : 14;
+
   return (
     <>
       <NodeResizer 
@@ -35,22 +44,25 @@ const FrameNode = memo(({ id, data, selected }: any) => {
           type="text"
           value={data.title}
           onChange={(e) => data.onRename && data.onRename(id, e.target.value)}
-          className="nodrag" // IMPORTANTE: Permite clicar no texto sem arrastar o mapa
+          className="nodrag"
           style={{
             position: 'absolute',
-            top: '-32px',
+            // Fazemos o eixo Y subir um pouco quando a fonte crescer para não encavalar
+            top: isZoomedOut ? `-${dynamicFontSize + 18}px` : '-32px',
             left: '-2px',
             background: selected ? '#a855f7' : '#52525b',
             color: '#fff',
             padding: '4px 16px',
             borderRadius: '6px 6px 0 0',
-            fontSize: '14px',
             fontWeight: 'bold',
             letterSpacing: '1px',
             border: 'none',
             outline: 'none',
-            minWidth: '200px', // Evita que a aba fique muito pequena
-            transition: 'background 0.2s'
+            minWidth: '200px',
+            
+            // Injeção do Zoom Semântico:
+            fontSize: `${dynamicFontSize}px`,
+            transition: 'background 0.2s, font-size 0.05s linear, top 0.05s linear'
           }}
         />
       </div>
