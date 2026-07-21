@@ -9,6 +9,8 @@ import SessionNode from './SessionNode';
 import { useRouter } from 'next/navigation';
 import { NodeResizer } from 'reactflow';
 import { toPng } from 'html-to-image';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 // Nó de Frame (Estilo Miro/Figma)
 // O Seletor de Câmera
@@ -130,6 +132,9 @@ export default function GameDesignMap({ userId, projectId, supabase }: MapProps)
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [aiFeedback, setAiFeedback] = useState<string>('');
 
+  // Estado de carregamento do botão LaTeX
+  const [isGeneratingLatex, setIsGeneratingLatex] = useState(false);
+
   const router = useRouter();
 
   // Estado para controlar quais playlists estão recolhidas (fechadas)
@@ -168,6 +173,51 @@ export default function GameDesignMap({ userId, projectId, supabase }: MapProps)
   // ==========================================
   // FUNÇÕES Do AGENT
   // ==========================================
+  // Motor de Geração e Download de LaTeX
+  const handleGenerateLatex = async () => {
+    setIsGeneratingLatex(true);
+    
+    // Você envia os mesmos dados compilados para a IA formatar
+    const payload = compileProjectDataForAI(); 
+
+    try {
+      // Fazemos a chamada para uma rota separada (que você criará no Next.js depois)
+      const response = await fetch('/api/latex', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectData: payload })
+      });
+
+      const data = await response.json();
+      
+      if (data.latex) {
+        // 1. Cria um arquivo .tex direto na memória do navegador do usuário
+        const blob = new Blob([data.latex], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        
+        // 2. Cria um link invisível e simula um clique para forçar o download
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'GDD_Estruturado.tex'; // O nome do arquivo salvo!
+        document.body.appendChild(link);
+        link.click();
+        
+        // 3. Limpa o link fantasma
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        
+      } else {
+        alert('Erro: O Agent não conseguiu formatar o código LaTeX.');
+      }
+      
+    } catch (error) {
+      console.error("Falha ao exportar:", error);
+      alert('Falha de conexão ao tentar gerar o documento LaTeX.');
+    } finally {
+      setIsGeneratingLatex(false);
+    }
+  };
+
   // 1. Função para o Input do Frame conseguir mudar o nome em tempo real
   const handleRenameFrame = useCallback((frameId: string, newTitle: string) => {
     setNodes((nds) =>
@@ -1475,13 +1525,61 @@ return (
               <style>{`@keyframes spin { 100% { transform: rotate(360deg); } }`}</style>
             </div>
           ) : aiFeedback ? (
-            // Resultado da Análise
-            <div style={{ 
-              whiteSpace: 'pre-wrap', // <-- ISSO É MÁGICA: Mantém as quebras de linha do GPT nativamente!
-              wordBreak: 'break-word' 
-            }}>
-              {aiFeedback}
+            
+            // ==========================================
+            // Resultado da Análise (AGORA COM MARKDOWN E BOTÃO LATEX)
+            // ==========================================
+            <div style={{ wordBreak: 'break-word', paddingBottom: '24px' }}>
+              <ReactMarkdown 
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  h1: ({node, ...props}) => <h1 style={{ color: '#a855f7', fontSize: '20px', borderBottom: '1px solid #3f3f46', paddingBottom: '4px', marginTop: '16px' }} {...props} />,
+                  h2: ({node, ...props}) => <h2 style={{ color: '#fff', fontSize: '18px', marginTop: '16px' }} {...props} />,
+                  h3: ({node, ...props}) => <h3 style={{ color: '#d1d5db', fontSize: '16px', marginTop: '12px' }} {...props} />,
+                  p: ({node, ...props}) => <p style={{ margin: '8px 0', lineHeight: '1.6' }} {...props} />,
+                  ul: ({node, ...props}) => <ul style={{ paddingLeft: '20px', margin: '8px 0' }} {...props} />,
+                  ol: ({node, ...props}) => <ol style={{ paddingLeft: '20px', margin: '8px 0' }} {...props} />,
+                  li: ({node, ...props}) => <li style={{ marginBottom: '6px' }} {...props} />,
+                  strong: ({node, ...props}) => <strong style={{ color: '#fbbf24' }} {...props} />,
+                  code: ({node, ...props}) => <code style={{ background: '#27272a', padding: '2px 4px', borderRadius: '4px', color: '#10b981', fontSize: '12px' }} {...props} />,
+                  pre: ({node, ...props}) => <pre style={{ background: '#121212', padding: '12px', borderRadius: '8px', border: '1px solid #3f3f46', overflowX: 'auto', marginTop: '8px' }} {...props} />,
+                }}
+              >
+                {aiFeedback}
+              </ReactMarkdown>
+
+              {/* MÁGICA 2: O BOTÃO OPCIONAL PARA GERAR LATEX */}
+              <div style={{ marginTop: '24px', paddingTop: '16px', borderTop: '1px solid #27272a', display: 'flex', flexDirection: 'column' }}>
+                <p style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '12px', textAlign: 'center' }}>
+                  A análise parece boa? Gere o documento oficial de Game Design.
+                </p>
+                <button
+                  onClick={handleGenerateLatex}
+                  disabled={isGeneratingLatex}
+                  style={{
+                    background: isGeneratingLatex ? '#3f3f46' : '#10b981',
+                    color: '#fff',
+                    border: 'none',
+                    padding: '12px',
+                    borderRadius: '6px',
+                    cursor: isGeneratingLatex ? 'not-allowed' : 'pointer',
+                    fontWeight: 'bold',
+                    fontSize: '14px',
+                    transition: 'all 0.2s',
+                    display: 'flex',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    gap: '8px'
+                  }}
+                >
+                  {isGeneratingLatex ? '⏳ GERANDO LATEX...' : '📄 EXPORTAR GDD (.TEX)'}
+                </button>
+              </div>
             </div>
+            // ==========================================
+            // FIM DO BLOCO NOVO
+            // ==========================================
+
           ) : (
             // Placeholder Inicial (Idle)
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', textAlign: 'center', color: '#52525b' }}>
@@ -1490,7 +1588,6 @@ return (
               <p style={{ fontSize: '12px', marginTop: '8px' }}>Clique em analisar para inspecionar os cartões da workspace e receber um Code Review de Game Design.</p>
             </div>
           )}
-          
         </div>
       </div>
 
