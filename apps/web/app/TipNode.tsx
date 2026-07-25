@@ -90,10 +90,22 @@ function TipNode({ id, data, selected }: TipNodeProps) {
           )}
         </div>
       
-      {/* IMAGEM DE CAPA */}
-      {data.imageUrl && data.imageUrl.trim() !== '' && (
-        <div style={{ width: '100%', height: isExpanded ? '250px' : '120px', backgroundImage: `url(${data.imageUrl})`, backgroundSize: 'cover', backgroundPosition: 'center', borderBottom: '1px solid #2a2a35', transition: 'height 0.3s' }} />
-      )}
+      {/* ÁREA DA IMAGEM */}
+        {data.imageUrl && (
+          <div style={{ width: '100%', background: '#000', display: 'flex', justifyContent: 'center' }}>
+            <img 
+              src={data.imageUrl} 
+              alt="Referência Visual"
+              style={{ 
+                width: '100%', 
+                height: 'auto', 
+                maxHeight: '2500px', // Trava uma altura máxima para a Tip não ficar gigante na tela
+                objectFit: 'contain', // A MÁGICA: Força a imagem a aparecer 100% inteira sem cortes
+                display: 'block'
+              }} 
+            />
+          </div>
+        )}
 
       <div style={{ position: 'relative' }}>
         {/* ÁREA DO CONTEÚDO (Agora com motor Markdown) */}

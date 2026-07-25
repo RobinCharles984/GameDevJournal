@@ -29,7 +29,12 @@ export async function POST(req: Request) {
           2. Não diga "Aqui está o código", não faça introduções e nem dê explicações.
           3. O texto deve começar EXATAMENTE em \\documentclass{article} e terminar em \\end{document}.
           4. Use os pacotes básicos no preâmbulo: \\usepackage[utf8]{inputenc}, \\usepackage{graphicx}, \\usepackage{hyperref}, \\usepackage{geometry}.
-          5. Organize as sessões e dicas usando \\section{}, \\subsection{} e \\begin{itemize}.`
+          5. Organize as sessões e dicas usando \\section{}, \\subsection{} e \\begin{itemize}.
+          6. Mantenha a formatação consistente e profissional, como se fosse um GDD real.
+          7. Não invente conteúdo; use apenas o que está no mapa mental fornecido.
+          8. Seja conciso, direto e técnico, como um documento de design de jogo deve ser.
+          9. Se o mapa estiver em inglês, mantenha o texto em inglês; se estiver em português, mantenha em português.
+          10. Evite qualquer comentário ou nota de rodapé que não esteja explicitamente no mapa mental.`
         },
         {
           role: "user",
