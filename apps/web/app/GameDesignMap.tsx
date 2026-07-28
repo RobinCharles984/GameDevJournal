@@ -16,11 +16,10 @@ import remarkGfm from 'remark-gfm';
 // O Seletor de Câmera
 const zoomSelector = (s: any) => s.transform[2];
 
-// Nó de Frame Editável (Com Zoom Semântico)
+// Nó de Frame Editável (Com Zoom Semântico e Memória de Tamanho)
 const FrameNode = memo(({ id, data, selected }: any) => {
   const zoom = useStore(zoomSelector);
   
-  // Como o texto do Frame começa menor (14px), a escala dele precisa ser um pouco diferente
   const isZoomedOut = zoom < 0.4;
   const dynamicFontSize = isZoomedOut ? Math.min(14 * (0.4 / zoom), 100) : 14;
 
@@ -31,6 +30,10 @@ const FrameNode = memo(({ id, data, selected }: any) => {
         isVisible={selected} 
         minWidth={300} 
         minHeight={300} 
+        // O SEGREDO AQUI: Avisar a "matemática" do mapa que o tamanho visual cresceu!
+        onResizeEnd={(_, params) => {
+          if (data.onResizeEnd) data.onResizeEnd(id, params.width, params.height);
+        }}
       />
       
       <div style={{
@@ -49,7 +52,6 @@ const FrameNode = memo(({ id, data, selected }: any) => {
           className="nodrag"
           style={{
             position: 'absolute',
-            // Fazemos o eixo Y subir um pouco quando a fonte crescer para não encavalar
             top: isZoomedOut ? `-${dynamicFontSize + 18}px` : '-32px',
             left: '-2px',
             background: selected ? '#a855f7' : '#52525b',
@@ -61,8 +63,6 @@ const FrameNode = memo(({ id, data, selected }: any) => {
             border: 'none',
             outline: 'none',
             minWidth: '200px',
-            
-            // Injeção do Zoom Semântico:
             fontSize: `${dynamicFontSize}px`,
             transition: 'background 0.2s, font-size 0.05s linear, top 0.05s linear'
           }}
@@ -231,19 +231,31 @@ export default function GameDesignMap({ userId, projectId, supabase }: MapProps)
   }, [setNodes]);
 
   // 2. Criação do Frame corrigida (Tamanho e Posição)
+  // Criação do Frame (Na Mira da Câmera e Integrado)
   const handleAddFrame = () => {
-    // Tenta jogar para o meio da tela do usuário
-    const centerX = (window.innerWidth / 2) - 300; 
-    const centerY = (window.innerHeight / 2) - 250;
+    // 1. Usa o seu radar de câmera para pegar a exata coordenada do mapa onde você está olhando
+    const spawnPos = getCenterSpawnPosition(); 
 
     const newFrame = {
       id: `frame-${Date.now()}`,
       type: 'frameNode',
-      position: { x: centerX, y: centerY },
-      // ISSO AQUI RESOLVE O BUG DELE NASCER ENCOLHIDO:
+      // Subtraímos 300 e 250 para o cursor ficar bem no centro do Frame ao nascer
+      position: { x: spawnPos.x - 300, y: spawnPos.y - 250 },
       style: { width: 600, height: 500 }, 
-      data: { title: 'Nova Área', onRename: handleRenameFrame },
-      zIndex: -10,
+      data: { 
+        title: 'Nova Área', 
+        onRename: handleRenameFrame,
+        // 2. A função que salva o novo tamanho do Frame no mapa assim que você solta o mouse
+        onResizeEnd: (id: string, width: number, height: number) => {
+          setNodes(nds => nds.map(n => n.id === id ? { 
+            ...n, 
+            style: { width, height },
+            // Joga o frame pro fundo com base no tamanho, garantindo que não bloqueie cliques nas Tips
+            zIndex: -Math.round((width * height) / 1000) 
+          } : n));
+        }
+      },
+      zIndex: -300, // Z-index inicial garantido bem no fundo
     };
     
     setNodes((nds) => [...nds, newFrame]);
@@ -255,31 +267,60 @@ export default function GameDesignMap({ userId, projectId, supabase }: MapProps)
     const selectedFrames = nodes.filter(n => n.type === 'frameNode' && n.selected);
     const hasSelectedFrames = selectedFrames.length > 0;
 
-    // Função auxiliar matemática de colisão (Bounding Box)
-    const isInsideAnySelectedFrame = (nodePos: { x: number, y: number }) => {
+    // ==========================================
+    // MÁGICA ESPACIAL: Converte posições relativas em absolutas
+    // ==========================================
+    const getAbsPos = (node: Node) => {
+      let x = node.position.x;
+      let y = node.position.y;
+      let parentId = node.parentNode;
+      
+      while (parentId) {
+        const parent = nodes.find(p => p.id === parentId);
+        if (parent) {
+          x += parent.position.x;
+          y += parent.position.y;
+          parentId = parent.parentNode;
+        } else break;
+      }
+      return { x, y };
+    };
+
+    // Função matemática de colisão rigorosa (Bounding Box)
+    const isInsideAnySelectedFrame = (node: Node) => {
       if (!hasSelectedFrames) return true; // Se não tem frame selecionado, aprova tudo
 
+      // Descobre as coordenadas reais do nó na tela
+      const nPos = getAbsPos(node);
+      const nW = (node.style?.width as number) || node.width || 250;
+      const nH = (node.style?.height as number) || node.height || 150;
+      
+      // Calcula o centro exato do nó (Para ser mais justo no recorte)
+      const centerX = nPos.x + (nW / 2);
+      const centerY = nPos.y + (nH / 2);
+
       return selectedFrames.some(frame => {
-        const fx = frame.position.x;
-        const fy = frame.position.y;
-        const fw = frame.width || 600;
-        const fh = frame.height || 500;
+        const fPos = getAbsPos(frame);
         
-        // Verifica se a coordenada do nó está dentro do retângulo do frame
-        return (nodePos.x >= fx && nodePos.x <= fx + fw && nodePos.y >= fy && nodePos.y <= fy + fh);
+        // Pega as dimensões reais (O React flow guarda o redimensionamento no "style")
+        const fw = (frame.style?.width as number) || frame.width || 600;
+        const fh = (frame.style?.height as number) || frame.height || 500;
+        
+        // Verifica se o CENTRO do nó está dentro do retângulo do frame
+        return (centerX >= fPos.x && centerX <= fPos.x + fw && centerY >= fPos.y && centerY <= fPos.y + fh);
       });
     };
 
-    // 2. Filtra Sessões e Tips, aplicando a regra de colisão
+    // 2. Filtra Sessões e Tips, aplicando a regra de colisão rigorosa
     const sessions = nodes
-      .filter(n => n.type === 'sessionNode' && isInsideAnySelectedFrame(n.position))
+      .filter(n => n.type === 'sessionNode' && isInsideAnySelectedFrame(n))
       .map(s => ({
         id: s.id,
         title: s.data.title || 'Sessão Sem Nome'
       }));
 
     const tips = nodes
-      .filter(n => n.type !== 'sessionNode' && n.type !== 'frameNode' && isInsideAnySelectedFrame(n.position))
+      .filter(n => n.type !== 'sessionNode' && n.type !== 'frameNode' && isInsideAnySelectedFrame(n))
       .map(t => {
         const parentSession = sessions.find(s => s.id === t.parentNode);
         return {
@@ -291,14 +332,11 @@ export default function GameDesignMap({ userId, projectId, supabase }: MapProps)
       });
 
     // 3. Mapeia conexões (Apenas entre nós que sobreviveram ao filtro)
-    const validNodeIds = [...sessions.map(s => s.id), ...tips.map(t => t.titulo)]; // Otimização simples
-    
     const relationships = edges.map(e => {
       const sourceNode = nodes.find(n => n.id === e.source);
       const targetNode = nodes.find(n => n.id === e.target);
       
-      // Só cria a relação se ambos os nós da ponta do cabo estiverem dentro do Frame
-      if (sourceNode && targetNode && isInsideAnySelectedFrame(sourceNode.position) && isInsideAnySelectedFrame(targetNode.position)) {
+      if (sourceNode && targetNode && isInsideAnySelectedFrame(sourceNode) && isInsideAnySelectedFrame(targetNode)) {
         return `${sourceNode.data.title || 'Desconhecido'} ---> conecta com ---> ${targetNode.data.title || 'Desconhecido'}`;
       }
       return null;
