@@ -172,6 +172,7 @@ function GameDesignMapContent({ userId, projectId, supabase }: MapProps) {
   const channelRef = useRef<any>(null);
   const [cursors, setCursors] = useState<any>({});
   const lastCursorTime = useRef(0);
+  const [userName, setUserName] = useState('Colaborador');
 
   //Estados de compartilhar
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
@@ -307,6 +308,20 @@ function GameDesignMapContent({ userId, projectId, supabase }: MapProps) {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [getNodes, getEdges, setNodes, setEdges, screenToFlowPosition]);
+
+  // 2. Busca o e-mail real do jogador logado e recorta a parte antes do @
+  useEffect(() => {
+    const fetchUserProfile = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user?.email) {
+        // Pega "john@email.com" e transforma em "john"
+        const defaultName = session.user.email.split('@')[0];
+        setUserName(defaultName);
+      }
+    };
+    
+    fetchUserProfile();
+  }, []);
 
   // =======================================================================
   // CARREGA A BARRA LATERAL (MEUS TEMPLATES / BLUEPRINTS)
@@ -1588,6 +1603,26 @@ return (
       
       {/* PAINEL ESQUERDO: Ações e Tips Salvos */}
       <div style={{ width: '260px', background: '#1e1e24', borderRight: '1px solid #2a2a35', padding: '16px', display: 'flex', flexDirection: 'column', gap: '24px', zIndex: 10 }}>
+        {/* INPUT PARA MUDAR O NOME NO MULTIPLAYER */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(255,255,255,0.05)', padding: '4px 12px', borderRadius: '8px', border: '1px solid #3f3f46' }}>
+        <span style={{ fontSize: '12px', color: '#a1a1aa' }}>Identificação:</span>
+        <input 
+          type="text" 
+          value={userName} 
+          onChange={(e) => setUserName(e.target.value)}
+          style={{ 
+            background: 'transparent', 
+            border: 'none', 
+            color: '#fff', 
+            fontSize: '14px',
+            fontWeight: 'bold',
+            width: '100px',
+            outline: 'none'
+          }}
+          placeholder="Seu nome"
+          maxLength={15} // Evita que alguém coloque um texto gigante e quebre a etiqueta do mouse
+        />
+      </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <button 
           onClick={() => router.push('/dashboard')}
@@ -1812,8 +1847,8 @@ return (
                   type: 'broadcast',
                   event: 'cursor-move',
                   payload: {
-                    userId: myUserId.current, // <-- O ID AGORA É FIXO! Acabaram os 1000 mouses.
-                    name: 'Colaborador',
+                    userId: myUserId.current, 
+                    name: userName, // <-- AQUI! Agora ele usa o nome dinâmico
                     x: flowPos.x,
                     y: flowPos.y
                   }
