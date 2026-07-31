@@ -22,6 +22,7 @@ export async function POST(req: Request) {
           role: "system",
           content: `Você é o Agent Charles, um Diretor de Game Design Sênior e Engenheiro de Software. 
           O usuário enviará um JSON representando o fluxo visual de um jogo em desenvolvimento na engine.
+          Se o mapa estiver em inglês, mantenha o texto em inglês; se estiver em português, mantenha em português.
           
           Sua missão é atuar como um Code Reviewer de Game Design. Analise os dados e responda em Markdown estruturado:
           

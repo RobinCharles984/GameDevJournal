@@ -1,0 +1,98 @@
+{
+    "login": {
+        "password": "Password",
+        "email": "Email",
+        "loginBtn": "Sign In",
+        "registerBtn": "Sign Up",
+        "tip_1": "Drag the blue dots to connect the nodes.",
+        "tip_2": "Authentication is triggered automatically upon double connection.",
+        "message": "Connect the credentials to the portal to access the system.",
+        "github_auth": "Initiating Handshake with GitHub...",
+        "github_error": "Failed to connect to GitHub.",
+        "login_empty": "Error: Nodes are empty. Fill in email and password.",
+        "login_compiling": "Compiling credentials...",
+        "login_error": "Invalid credentials or unconfirmed email.",
+        "login_success": "Access Granted! Entering Workspace...",
+        "password_error": "Server error. Try using a stronger password.",
+        "created_account": "Account created! Move the cables to the LOGIN portal.",
+        "loading": "PROCESSING..."
+    },
+    "dashboard": {
+        "title": "My Projects",
+        "create_project_placeholder": "New Project Name",
+        "create_project_btn": "Create and Enter",
+        "project_description": "Click to open the workspace",
+        "name_alert": "Enter a name for the project",
+        "create_project_error": "You need to be logged in!",
+        "dashboard_error": "Error creating: ",
+        "signOutBtn": "Sign Out"
+    },
+  "workspace": {
+    "back_button": "← Back",
+    "newFrame": "[ ] Add Frame",
+    "png": "📸 Exportar PNG",
+    "pdf": "📄 Exportar PDF",
+    "newTip": "+ Add Tip",
+    "newSession": "[  ] Create Session",
+    "shareTip": "Share Tip",
+    "shareProject": "Share Project",
+    "exportProject": "Export Project",
+    "sessionSection": "Sessions 📦",
+    "tipsSection": "Tips ⭐",
+    "library": "Library 📚",
+    "noFile": "No Files",
+    "delete": "Delete",
+    "searchLibrary": "Search saved...",
+    "searchMap": "Search in map...",
+    "oddTip": "💡 Odd Tip",
+    "oddSesssion": "📦 Odd Session"
+  },
+  "tips": {
+    "newTip": "New Tip",
+    "editTip": "Edit Tip",
+    "tipTitle": "Idea Title",
+    "tipContent": "Describe the mechanic, story, etc...",
+    "tipTags": "Tags (comma-separated)",
+    "tipImage": "Image URL (Ex: https://...)",
+    "tipUrl": "Reference Link (Ex: https://...)",
+    "cancel_button": "Cancel",
+    "save_button": "Save",
+    "edit": "Edit",
+    "delete":"Delete",
+    "expand": "↗ Expand",
+    "collapse": "↙ Collapse",
+    "link": "🔗 Access Link",
+    "visualReference": "Visual Reference"
+  },
+  "session": {
+    "sessionTitle": "Session Name",
+    "sessionColor": "Border color:",
+    "ssessionEdit": "Edit Session",
+    "cancel_button": "Cancel",
+    "save_button": "Save"
+  },
+  "connection": {
+    "connectionTitle": "Connection Style",
+    "connectionColor": "Color:",
+    "connectionSize": "Thickness: ",
+    "cancel_button": "Cancel",
+    "save_button": "Save"
+  },
+  "playlist":{
+    "playlistTitle": "Playlist Name (Optional):",
+    "playlistTitle_placeholder": "Ex: Stories, Characters...",
+    "cancel_button": "Cancel",
+    "save_button": "Save"
+  },
+  "agent": {
+    "isAnalyzing_1": "COMPILING...",
+    "isAnalyzing_2": "ANALYZE PROJECT",
+    "message_1": "Analyzing Game Design...",
+    "message_2": "Checking logical and mechanical dependencies",
+    "results": "Does the analysis look good? Generate the official Game Design document.",
+    "isGeneratingLatex_1": "⏳ GENERATING LATEX...",
+    "isGeneratingLatex_2": "📄 EXPORT GDD (.TEX)",
+    "idle_1": "The Agent is idle.",
+    "idle_2": "Click analyze to inspect the workspace cards and receive a Game Design Code Review."
+  }
+}

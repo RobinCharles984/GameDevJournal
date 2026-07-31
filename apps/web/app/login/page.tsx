@@ -1,10 +1,12 @@
 'use client';
 
 import { useState, useRef, useCallback, memo } from 'react';
+import {useTranslation} from 'react-i18next';
 import { useRouter } from 'next/navigation';
 import ReactFlow, { Background, Controls, Handle, Position, addEdge, Edge, Node, applyNodeChanges, applyEdgeChanges, NodeChange, EdgeChange, ConnectionMode } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { supabase } from '../supabase';
+import LanguageSwitcher from '../components/LanguageSwitcher';
 
 // ============================================================================
 // NÓS CUSTOMIZADOS (Devem ficar de fora da função principal)
@@ -59,9 +61,10 @@ const nodeTypes = { inputNode: InputNode, gateNode: GateNode, oauthNode: OAuthNo
 // ============================================================================
 
 export default function LoginWorkspacePage() {
+  const { t } = useTranslation();
   const router = useRouter();
   const [edges, setEdges] = useState<Edge[]>([]);
-  const [systemMsg, setSystemMsg] = useState({ text: 'Conecte as credenciais no portal para acessar o sistema.', type: 'info' });
+  const [systemMsg, setSystemMsg] = useState({ text: t('login.message'), type: 'info' });
   const [isLoading, setIsLoading] = useState(false);
 
   // Usamos useRef para guardar os valores digitados sem precisar re-renderizar o React Flow a cada tecla
@@ -71,11 +74,11 @@ export default function LoginWorkspacePage() {
   const [nodes, setNodes] = useState<Node[]>([
     {
       id: 'node-email', type: 'inputNode', position: { x: 100, y: 150 },
-      data: { label: 'E-mail', type: 'email', placeholder: 'gamedev@studio.com', onChange: (val: string) => creds.current.email = val }
+      data: { label: t('login.email'), type: 'email', placeholder: 'gamedev@studio.com', onChange: (val: string) => creds.current.email = val }
     },
     {
       id: 'node-password', type: 'inputNode', position: { x: 80, y: 350 },
-      data: { label: 'Senha', type: 'password', placeholder: '••••••••', onChange: (val: string) => creds.current.password = val }
+      data: { label: t('login.password'), type: 'password', placeholder: '••••••••', onChange: (val: string) => creds.current.password = val }
     },
     {
       id: 'node-github', type: 'oauthNode', position: { x: 150, y: 550 },
@@ -83,11 +86,11 @@ export default function LoginWorkspacePage() {
     },
     {
       id: 'gate-login', type: 'gateNode', position: { x: 600, y: 200 },
-      data: { label: 'Entrar', color: '#10b981' } // Verde
+      data: { label: t('login.loginBtn'), color: '#10b981' } // Verde
     },
     {
       id: 'gate-signup', type: 'gateNode', position: { x: 600, y: 450 },
-      data: { label: 'Criar Conta', color: '#eab308' } // Amarelo
+      data: { label: t('login.registerBtn'), color: '#eab308' } // Amarelo
     }
   ]);
 
@@ -109,12 +112,12 @@ export default function LoginWorkspacePage() {
     // REGRA 1: LOGIN COM GITHUB
     // ====================================================================
     if (params.source === 'node-github' && targetId === 'gate-login') {
-      setSystemMsg({ text: 'Iniciando Handshake com GitHub...', type: 'info' });
+      setSystemMsg({ text: t('login.github_auth'), type: 'info' });
       const { error } = await supabase.auth.signInWithOAuth({ provider: 'github' });
       
       if (error) {
         console.error("ERRO GITHUB:", error); // <-- Adicionado para você ver no F12
-        setSystemMsg({ text: error.message || 'Falha ao conectar no GitHub.', type: 'error' });
+        setSystemMsg({ text: error.message || t('login.github_error'), type: 'error' });
       }
       return;
     }
@@ -134,13 +137,13 @@ export default function LoginWorkspacePage() {
       console.log("Tentando autenticar com:", { email, password });
 
       if (!email || !password) {
-        setSystemMsg({ text: 'Erro: Os nós estão vazios. Preencha e-mail e senha.', type: 'error' });
+        setSystemMsg({ text: t('login.login_empty'), type: 'error' });
         setTimeout(() => setEdges([]), 1500); 
         return;
       }
 
       setIsLoading(true);
-      setSystemMsg({ text: 'Compilando credenciais...', type: 'info' });
+      setSystemMsg({ text: t('login.login_compiling'), type: 'info' });
 
       if (targetId === 'gate-login') {
         const { data, error } = await supabase.auth.signInWithPassword({ email, password });
@@ -148,13 +151,13 @@ export default function LoginWorkspacePage() {
           console.error("ERRO LOGIN SUPABASE:", error); // <-- O VERDADEIRO MOTIVO VAI APARECER AQUI
           
           // Se o Supabase mandar "{}", nós forçamos uma mensagem amigável
-          const errorMessage = error.message === "{}" ? "Credenciais inválidas ou e-mail não confirmado." : error.message;
+          const errorMessage = error.message === "{}" ? t('login.login_error') : error.message;
           setSystemMsg({ text: errorMessage, type: 'error' });
           
           setIsLoading(false);
           setEdges([]);
         } else {
-          setSystemMsg({ text: 'Acesso Liberado! Entrando no Workspace...', type: 'success' });
+          setSystemMsg({ text: t('login.login_success'), type: 'success' });
           router.push('/dashboard'); // <-- Ajuste para a URL correta do seu workspace se precisar
         }
       } 
@@ -164,10 +167,10 @@ export default function LoginWorkspacePage() {
         if (error) {
           console.error("ERRO SIGNUP SUPABASE:", error); // <-- O VERDADEIRO MOTIVO VAI APARECER AQUI
           
-          const errorMessage = error.message === "{}" ? "Erro no servidor. Tente usar uma senha mais forte." : error.message;
+          const errorMessage = error.message === "{}" ? t('login.password_error') : error.message;
           setSystemMsg({ text: errorMessage, type: 'error' });
         } else {
-          setSystemMsg({ text: 'Conta criada! Mova os cabos para o portal ENTRAR.', type: 'success' });
+          setSystemMsg({ text: t('login.created_account'), type: 'success' });
           setEdges([]); 
         }
         setIsLoading(false);
@@ -188,7 +191,7 @@ export default function LoginWorkspacePage() {
           padding: '8px 16px', borderRadius: '20px', fontSize: '14px', fontWeight: 'bold', backdropFilter: 'blur(4px)',
           transition: 'all 0.3s'
         }}>
-          {isLoading ? 'PROCESSANDO...' : systemMsg.text}
+          {isLoading ? t('login.loading') : systemMsg.text}
         </div>
       </div>
 
@@ -207,8 +210,8 @@ export default function LoginWorkspacePage() {
 
       {/* Instruções Fixas no Canto */}
       <div style={{ position: 'absolute', bottom: 32, left: 32, zIndex: 10, color: '#6b7280', fontSize: '13px', pointerEvents: 'none' }}>
-        <p style={{ margin: 0 }}>&gt; Arraste as bolinhas azuis para conectar os nós.</p>
-        <p style={{ margin: '4px 0 0 0' }}>&gt; A autenticação é disparada automaticamente na conexão dupla.</p>
+        <p style={{ margin: 0 }}>&gt; {t('login.tip_1')}</p>
+        <p style={{ margin: '4px 0 0 0' }}>&gt; {t('login.tip_2')}</p>
       </div>
 
     </div>
