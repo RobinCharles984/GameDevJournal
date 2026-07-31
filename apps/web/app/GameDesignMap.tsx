@@ -315,7 +315,7 @@ function GameDesignMapContent({ userId, projectId, supabase }: MapProps) {
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user?.email) {
         // Pega "john@email.com" e transforma em "john"
-        const defaultName = session.user.email.split('@')[0];
+        const defaultName = session.user.email.split('@')[0] as string;
         setUserName(defaultName);
       }
     };
