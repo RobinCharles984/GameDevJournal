@@ -4,8 +4,11 @@ import { useEffect, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { supabase } from '../supabase';
 import { useRouter } from 'next/navigation';
+import { useTranslation } from 'react-i18next';
+import LanguageSwitcher from '../components/LanguageSwitcher';
 
 export default function Dashboard() {
+  const { t } = useTranslation();
   const [projects, setProjects] = useState<any[]>([]);
   const [newProjectName, setNewProjectName] = useState('');
   const router = useRouter();
@@ -33,11 +36,11 @@ export default function Dashboard() {
   };
 
   const handleCreateProject = async () => {
-    if (!newProjectName.trim()) return alert('Digite um nome para o projeto!');
+    if (!newProjectName.trim()) return alert(t('dashboard.name_alert'));
 
     const { data: { session } } = await supabase.auth.getSession();
     
-    if (!session) return alert('Você precisa estar logado!');
+    if (!session) return alert(t('dashboard.create_project_error'));
 
     // Tenta inserir no banco
     const { data, error } = await supabase
@@ -49,7 +52,7 @@ export default function Dashboard() {
     // === TRATAMENTO DE ERRO (Isso resolve o "não acontece nada") ===
     if (error) {
       console.error('Erro completo do Supabase:', error);
-      alert(`Erro ao criar: ${error.message}`);
+      alert(`{${t('dashboard.dashboard_error')}} ${error.message}`);
       return;
     }
 
@@ -61,19 +64,19 @@ export default function Dashboard() {
   return (
     <div style={{ padding: '40px', background: '#121212', minHeight: '100vh', color: '#fff', fontFamily: 'sans-serif' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', borderBottom: '1px solid #333', paddingBottom: '12px' }}>
-        <h1 style={{ margin: 0 }}>Meus Projetos</h1>
+        <h1 style={{ margin: 0 }}>{t('dashboard.title')}</h1>
         <button 
           onClick={handleLogout}
           style={{ padding: '8px 16px', background: 'transparent', color: '#ef4444', border: '1px solid #ef4444', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
         >
-          Sair
+          {t('dashboard.signOutBtn')}
         </button>
       </div>
       
       <div style={{ marginBottom: '40px', display: 'flex', gap: '12px' }}>
         <input 
           type="text" 
-          placeholder="Nome do Novo Projeto" 
+          placeholder={t('dashboard.create_project_placeholder')} 
           value={newProjectName}
           onChange={(e) => setNewProjectName(e.target.value)}
           style={{ padding: '10px', borderRadius: '4px', border: '1px solid #333', background: '#1e1e24', color: '#fff', width: '300px' }}
@@ -82,7 +85,7 @@ export default function Dashboard() {
           onClick={handleCreateProject}
           style={{ padding: '10px 20px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
         >
-          Criar e Entrar
+          {t('dashboard.create_project_btn')}
         </button>
       </div>
 
@@ -99,7 +102,7 @@ export default function Dashboard() {
             onMouseOut={(e) => e.currentTarget.style.borderColor = '#333'}
           >
             <h3 style={{ margin: '0 0 8px 0', fontSize: '18px' }}>{project.title}</h3>
-            <p style={{ margin: 0, fontSize: '12px', color: '#888' }}>Clique para abrir o workspace</p>
+            <p style={{ margin: 0, fontSize: '12px', color: '#888' }}>{t('dashboard.project_description')}</p>
           </div>
         ))}
       </div>

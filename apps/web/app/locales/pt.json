@@ -1,0 +1,98 @@
+{
+    "login": {
+        "password": "Senha",
+        "email": "Email",
+        "loginBtn": "Entrar",
+        "registerBtn": "Criar Conta",
+        "tip_1": "Arraste as bolinhas azuis para conectar os nós.",
+        "tip_2": "A autenticação é disparada automaticamente na conexão dupla.",
+        "message": "Conecte as credenciais no portal para acessar o sistema.",
+        "github_auth": "Iniciando Handshake com GitHub...",
+        "github_error": "Falha ao conectar no GitHub.",
+        "login_empty": "Erro: Os nós estão vazios. Preencha e-mail e senha.",
+        "login_compiling": "Compilando credenciais...",
+        "login_error": "Credenciais inválidas ou e-mail não confirmado.",
+        "login_success": "Acesso Liberado! Entrando no Workspace...",
+        "password_error": "Erro no servidor. Tente usar uma senha mais forte.",
+        "created_account": "Conta criada! Mova os cabos para o portal ENTRAR.",
+        "loading": "PROCESSANDO..."
+    },
+    "dashboard": {
+        "title": "Meus Projetos",
+        "create_project_placeholder": "Nome do Novo Projeto",
+        "create_project_btn": "Criar e Entrar",
+        "project_description": "Clique para abrir o workspace",
+        "name_alert": "Digite um nome para o projeto",
+        "create_project_error": "Você precisa estar logado!",
+        "dashboard_error": "Erro ao criar: ",
+        "signOutBtn": "Sair"
+    },
+  "workspace": {
+    "back_button": "← Voltar",
+    "newFrame": "[ ] Adicionar Frame",
+    "png": "📸 Exportar PNG",
+    "pdf": "📄 Exportar PDF",
+    "newTip": "+ Adicionar Tip",
+    "newSession": "[  ] Criar Sessão",
+    "shareTip": "Compartilhar Tip",
+    "shareProject": "Compartilhar Projeto",
+    "exportProject": "Exportar Projeto",
+    "sessionSection": "Sessões 📦",
+    "tipsSection": "Tips ⭐",
+    "library": "Biblioteca 📚",
+    "noFile": "Itens Soltos",
+    "delete": "Excluir",
+    "searchLibrary": "Pesquisar salvos...",
+    "searchMap": "Pesquisar no mapa...",
+    "oddTip": "💡 Tip Avulsa",
+    "oddSesssion": "📦 Pacote de Sessão"
+  },
+  "tips": {
+    "newTip": "Nova Tip",
+    "editTip": "Editar Tip",
+    "tipTitle": "Título da Ideia",
+    "tipContent": "Descreva a mecânica, história, etc...",
+    "tipTags": "Tags (separadas por vírgula)",
+    "tipImage": "URL da Imagem (Ex: https://...)",
+    "tipUrl": "Link de Referência (Ex: https://...)",
+    "cancel_button": "Cancelar",
+    "save_button": "Salvar",
+    "edit": "Editar",
+    "delete":"Excluir",
+    "expand": "↗ Expandir",
+    "collapse": "↙ Encolher",
+    "link": "🔗 Acessar Link",
+    "visualReference": "Referência Visual"
+  },
+  "session": {
+    "sessionTitle": "Nome da Sessão",
+    "sessionColor": "Cor da borda:",
+    "ssessionEdit": "Editar Sessão",
+    "cancel_button": "Cancelar",
+    "save_button": "Salvar"
+  },
+  "connection": {
+    "connectionTitle": "Estilo da Conexão",
+    "connectionColor": "Cor:",
+    "connectionSize": "Espessura: ",
+    "cancel_button": "Cancelar",
+    "save_button": "Salvar"
+  },
+  "playlist":{
+    "playlistTitle": "Nome da Playlist (Opcional):",
+    "playlistTitle_placeholder": "Ex: Histórias, Personagens...",
+    "cancel_button": "Cancelar",
+    "save_button": "Salvar"
+  },
+  "agent": {
+    "isAnalyzing_1": "COMPILANDO...",
+    "isAnalyzing_2": "ANALISAR PROJETO",
+    "message_1": "Analisando Game Design...",
+    "message_2": "Verificando dependências lógicas e mecânicas",
+    "results": "A análise parece boa? Gere o documento oficial de Game Design.",
+    "isGeneratingLatex_1": "⏳ GERANDO LATEX...",
+    "isGeneratingLatex_2": "📄 EXPORTAR GDD (.TEX)",
+    "idle_1": "O Agent está ocioso.",
+    "idle_2": "Clique em analisar para inspecionar os cartões da workspace e receber um Code Review de Game Design."
+  }
+}

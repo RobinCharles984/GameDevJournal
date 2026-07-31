@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, memo } from 'react';
 import { Handle, Position } from 'reactflow';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { useTranslation } from 'react-i18next';
 
 interface TipNodeProps {
   id: string;
@@ -20,6 +21,7 @@ interface TipNodeProps {
 }
 
 function TipNode({ id, data, selected }: TipNodeProps) {
+  const { t } = useTranslation();
   const [isExpanded, setIsExpanded] = useState(false);
   const [isOverflowing, setIsOverflowing] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -95,7 +97,7 @@ function TipNode({ id, data, selected }: TipNodeProps) {
           <div style={{ width: '100%', background: '#000', display: 'flex', justifyContent: 'center' }}>
             <img 
               src={data.imageUrl} 
-              alt="Referência Visual"
+              alt={t('tips.visualReference')}
               style={{ 
                 width: '100%', 
                 height: 'auto', 
@@ -144,7 +146,7 @@ function TipNode({ id, data, selected }: TipNodeProps) {
           {/* LINK EXTERNO */}
           {data.linkUrl && data.linkUrl.trim() !== '' && (
             <a href={data.linkUrl.startsWith('http') ? data.linkUrl : `https://${data.linkUrl}`} target="_blank" rel="noopener noreferrer" style={{ display: 'block', marginTop: '12px', padding: '8px', background: '#2563eb', color: '#fff', textAlign: 'center', textDecoration: 'none', borderRadius: '4px', fontWeight: 'bold' }}>
-              🔗 Acessar Link
+              {t('tips.link')}
             </a>
           )}
         </div>
@@ -166,13 +168,13 @@ function TipNode({ id, data, selected }: TipNodeProps) {
         <div style={{ flex: 1 }}>
           {/* CORREÇÃO DO BOTÃO: Agora ele SEMPRE aparece, permitindo expandir a qualquer momento */}
           <button onClick={toggleExpand} style={{ background: 'transparent', border: 'none', color: '#a855f7', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>
-            {isExpanded ? '↙ Encolher' : '↗ Expandir'}
+            {isExpanded ? t('tips.collapse') : t('tips.expand')}
           </button>
         </div>
         <div style={{ display: 'flex', gap: '8px' }}>
           <button onClick={(e) => { e.stopPropagation(); data.onSaveTemplate(id); }} style={{ background: 'transparent', border: 'none', color: '#10b981', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>⭐</button>
-          <button onClick={(e) => { e.stopPropagation(); data.onEdit(id, data.title, data.content, data.tags || [], data.imageUrl || '', data.linkUrl || ''); }} style={{ background: 'transparent', border: 'none', color: '#3b82f6', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>Editar</button>
-          <button onClick={(e) => { e.stopPropagation(); data.onDelete(id); }} style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>Excluir</button>
+          <button onClick={(e) => { e.stopPropagation(); data.onEdit(id, data.title, data.content, data.tags || [], data.imageUrl || '', data.linkUrl || ''); }} style={{ background: 'transparent', border: 'none', color: '#3b82f6', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>{t('tips.edit')}</button>
+          <button onClick={(e) => { e.stopPropagation(); data.onDelete(id); }} style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>{t('tips.delete')}</button>
         </div>
       </div>
     </div>

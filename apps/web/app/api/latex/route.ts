@@ -42,7 +42,7 @@ export async function POST(req: Request) {
         }
       ],
       temperature: 0.2, // Temperatura bem baixa para ele não inventar moda e focar no código
-      max_tokens: 2500, // Maior porque a formatação de código gasta mais tokens
+      max_tokens: 3000, // Maior porque a formatação de código gasta mais tokens
     });
 
     // MÁGICA: Aqui nós devolvemos com a chave "latex", que é exatamente o que o front-end está esperando para fazer o download

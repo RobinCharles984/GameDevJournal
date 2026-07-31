@@ -1,4 +1,5 @@
 import { memo } from 'react';
+import {useTranslation} from 'react-i18next';
 import { Handle, Position, useStore } from 'reactflow';
 import { NodeResizer } from '@reactflow/node-resizer';
 import '@reactflow/node-resizer/dist/style.css';
@@ -21,6 +22,7 @@ interface SessionNodeProps {
 export function SessionNode({ id, data, selected }: SessionNodeProps) {
   const zoom = useStore(zoomSelector);
   const themeColor = data.color || '#3b82f6';
+  const { t } = useTranslation();
   
   const handleStyle = { width: '12px', height: '12px', background: themeColor, border: '2px solid #1e1e24', borderRadius: '2px' };
 
