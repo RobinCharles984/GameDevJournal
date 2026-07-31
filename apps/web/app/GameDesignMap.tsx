@@ -1850,7 +1850,6 @@ return (
                     userId: myUserId.current, 
                     name: userName, // <-- AQUI! Agora ele usa o nome dinâmico
                     userId: myUserId.current, // <-- O ID AGORA É FIXO! Acabaram os 1000 mouses.
-                    name: 'Colaborador',
                     x: flowPos.x,
                     y: flowPos.y
                   }
