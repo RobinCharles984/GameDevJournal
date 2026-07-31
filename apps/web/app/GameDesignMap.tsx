@@ -1847,7 +1847,6 @@ return (
                   type: 'broadcast',
                   event: 'cursor-move',
                   payload: {
-                    userId: myUserId.current, 
                     name: userName, // <-- AQUI! Agora ele usa o nome dinâmico
                     userId: myUserId.current, // <-- O ID AGORA É FIXO! Acabaram os 1000 mouses.
                     x: flowPos.x,
